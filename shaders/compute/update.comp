@@ -1,0 +1,31 @@
+#version 450 core
+
+layout(local_size_x = 256) in;
+
+struct Particle {
+    vec4 pos;  // xyz = position, w = unused
+    vec4 vel;  // xyz = velocity, w = unused
+};
+
+layout(std430, binding = 0) buffer ParticleBuffer {
+    Particle particles[];
+};
+
+uniform float dt;
+uniform uint num_particles;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= num_particles) return;
+
+    // Integrate velocity
+    particles[i].pos.xyz += particles[i].vel.xyz * dt;
+
+    // Wrap to [-1, 1] box
+    for (int c = 0; c < 3; ++c) {
+        if (particles[i].pos[c] >  1.0) particles[i].pos[c] -= 2.0;
+        if (particles[i].pos[c] < -1.0) particles[i].pos[c] += 2.0;
+    }
+
+    // TODO: replace with your simulation logic
+}
