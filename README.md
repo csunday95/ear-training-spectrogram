@@ -1,55 +1,53 @@
-# OpenGL Compute Shader Template
+# Ear Training Spectrogram
 
-A minimal OpenGL 4.5 starter kit with compute shader support for GPU-driven particle simulation.
+A real-time spectrogram for piano/voice ear training. Captures microphone audio and displays a live waterfall spectrogram alongside a pitch detector that shows whether a sung note is flat or sharp relative to a piano reference.
 
 ## Features
 
-- **Compute Shaders**: GPU-accelerated particle updates
-- **GLFW Window**: Cross-platform windowing
-- **ImGui Overlay**: Real-time stats display (particle count, FPS)
-- **Camera Controls**: Mouse-based orbit camera
-- **Catch2 Testing**: Shader compilation tests
-- **CMake Build**: FetchContent dependencies (GLFW, GLM, ImGui, Catch2)
+- **Live spectrogram**: Scrolling waterfall display + real-time FFT magnitude spectrum
+- **GPU-accelerated FFT**: Stockham radix-2 compute shader pipeline
+- **Tuner indicator**: Flat/sharp direction with cent offset, color-coded (blue=flat, green=in-tune, red=sharp)
+- **Piano note detection**: FFT peak picking with parabolic interpolation for sub-bin accuracy
+- **Voice pitch tracking**: YIN algorithm for monophonic voice pitch
+- **Single mic**: Captures both piano and voice; software source discrimination
+- **Configurable FFT size**: Trade frequency resolution vs. time resolution at runtime
 
-## Using This Template
+## Requirements
 
-To start a new project from this template:
-
-```bash
-# Clone the template
-git clone https://github.com/csunday95/opengl-template.git my-project
-cd my-project
-
-# Disconnect from this template repo
-git remote remove origin
-git remote add origin <your-new-repo-url>
-
-# Push to your new repo
-git branch -M main
-git push -u origin main
-```
-
-This gives you a clean, independent project. If you want to track template improvements later, you can add `git remote add upstream https://github.com/csunday95/opengl-template.git` and merge updates as needed.
+- OpenGL 4.5 capable GPU
+- Microphone (any system input device)
+- Windows or Linux
 
 ## Building
 
 ```bash
 cmake --preset debug
 cmake --build build/debug
-./build/debug/opengl_template
+./build/debug/ear_training
 ```
+
+Requires clang and Ninja. Dependencies (GLFW, GLM, ImGui, miniaudio, Catch2) are fetched automatically by CMake.
 
 ## Options
 
 ```
---particles N     Number of particles (default: 4096)
---width W         Window width (default: 1280)
---height H        Window height (default: 720)
+--fft-n N     FFT size, must be power of 2 (default: 4096)
+--width W     Window width (default: 1280)
+--height H    Window height (default: 720)
 ```
+
+Larger FFT size gives better frequency resolution (useful for low bass notes) at the cost of slower time response. For piano ear training in middle octaves, 4096 at 44.1kHz gives ~10.7 Hz/bin — enough to resolve adjacent semitones above A1.
+
+## Running Tests
+
+```bash
+ctest --test-dir build/debug --output-on-failure
+```
+
+GL-dependent tests skip automatically if no display or GPU is available (headless/CI).
 
 ## Architecture
 
-- `src/core/`: GL initialization, shader loading, camera
-- `shaders/compute/`: Particle update kernel
-- `shaders/render/`: Point rendering (vert + frag)
-- `tests/`: Shader compilation tests
+Audio is captured from the default mic via miniaudio into a lock-free ring buffer. Each frame, the GPU pipeline windows and FFTs the audio, computes magnitudes, and updates the waterfall texture. Pitch detection runs on the CPU from a persistent-mapped magnitude buffer (no pipeline stall).
+
+See [`CLAUDE.md`](CLAUDE.md) for developer-focused architecture details.

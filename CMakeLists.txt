@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(opengl_template LANGUAGES C CXX)
+project(ear_training LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,22 +59,24 @@ target_include_directories(imgui_lib PUBLIC
 )
 target_link_libraries(imgui_lib PUBLIC glfw)
 
-# glad2 (vendored, GL 4.5 core)
+# glad2 (vendored, GL 4.5 core). SYSTEM suppresses warnings from khrplatform.h in dependents.
 add_library(glad STATIC deps/glad/src/gl.c)
-target_include_directories(glad PUBLIC deps/glad/include)
+target_include_directories(glad SYSTEM PUBLIC deps/glad/include)
 
-# --- Main executable ---
-
-add_executable(opengl_template
-    src/main.cpp
-    src/core/shader.cpp
-    src/core/gl_init.cpp
-    src/core/camera.cpp
+# miniaudio (single-header, header-only interface target)
+FetchContent_Declare(
+    miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        0.11.21
+    GIT_SHALLOW    TRUE
 )
+FetchContent_MakeAvailable(miniaudio)
+add_library(miniaudio INTERFACE)
+target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
 
-target_include_directories(opengl_template PRIVATE src/core)
-target_link_libraries(opengl_template PRIVATE glad glfw glm::glm CLI11::CLI11 imgui_lib)
-target_compile_options(opengl_template PRIVATE
+# --- Compiler warning flags ---
+
+set(COMMON_WARNINGS
     -Wall -Wextra -Wpedantic
     -Wshadow
     -Wswitch-enum
@@ -86,18 +88,42 @@ target_compile_options(opengl_template PRIVATE
     -Werror=unused-result
 )
 
-# Copy shader subdirs to build directory (skips non-shader files like CLAUDE.md)
+# --- Main executable ---
+
+add_executable(ear_training
+    src/main.cpp
+    src/core/shader.cpp
+    src/core/gl_init.cpp
+    src/audio/audio_capture.cpp
+    src/audio/miniaudio_impl.cpp
+)
+
+target_include_directories(ear_training PRIVATE src/core src/audio)
+target_link_libraries(ear_training PRIVATE glad glfw glm::glm CLI11::CLI11 imgui_lib miniaudio)
+target_compile_options(ear_training PRIVATE ${COMMON_WARNINGS})
+# miniaudio is third-party — suppress warnings for its implementation TU only
+set_source_files_properties(src/audio/miniaudio_impl.cpp PROPERTIES COMPILE_OPTIONS "-w")
+
+# Copy shader subdirs to build directory
 add_custom_target(copy_shaders ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders/render  $<TARGET_FILE_DIR:opengl_template>/shaders/render
-    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders/compute $<TARGET_FILE_DIR:opengl_template>/shaders/compute
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders/compute $<TARGET_FILE_DIR:ear_training>/shaders/compute
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders/render  $<TARGET_FILE_DIR:ear_training>/shaders/render
     COMMENT "Copying shaders to build directory"
 )
-add_dependencies(copy_shaders opengl_template)
+add_dependencies(copy_shaders ear_training)
 
 # On Linux, link OpenGL explicitly
 if(UNIX AND NOT APPLE)
     find_package(OpenGL REQUIRED)
-    target_link_libraries(opengl_template PRIVATE OpenGL::GL)
+    target_link_libraries(ear_training PRIVATE OpenGL::GL)
+endif()
+
+# On Linux, link threading for miniaudio
+if(UNIX)
+    find_package(Threads REQUIRED)
+    target_link_libraries(ear_training PRIVATE Threads::Threads)
+    # miniaudio needs dl and m on Linux
+    target_link_libraries(ear_training PRIVATE dl m)
 endif()
 
 # --- Test executable ---
@@ -111,24 +137,19 @@ FetchContent_MakeAvailable(Catch2)
 
 add_executable(app_tests
     tests/test_shader_loading.cpp
+    tests/test_ring_buffer.cpp
     src/core/shader.cpp
     src/core/gl_init.cpp
 )
-target_include_directories(app_tests PRIVATE src/core)
+target_include_directories(app_tests PRIVATE src/core src/audio)
 target_link_libraries(app_tests PRIVATE Catch2::Catch2WithMain glad glfw)
-target_compile_options(app_tests PRIVATE
-    -Wall -Wextra -Wpedantic
-    -Wshadow
-    -Wswitch-enum
-    -Wconversion -Wsign-conversion
-    -Wnon-virtual-dtor
-    -Werror=return-type
-    -Werror=switch-enum
-    -Werror=implicit-fallthrough
-    -Werror=unused-result
-)
+# Catch2 uses __COUNTER__ internally which triggers -Wc2y-extensions under -Wpedantic
+target_compile_options(app_tests PRIVATE ${COMMON_WARNINGS} -Wno-c2y-extensions)
 if(UNIX AND NOT APPLE)
     target_link_libraries(app_tests PRIVATE OpenGL::GL)
+endif()
+if(UNIX)
+    target_link_libraries(app_tests PRIVATE Threads::Threads dl m)
 endif()
 add_dependencies(app_tests copy_shaders)
 

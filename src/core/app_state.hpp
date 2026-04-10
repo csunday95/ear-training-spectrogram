@@ -1,6 +1,5 @@
 #pragma once
-#include "camera.hpp"
 
-struct AppState {
-    Camera camera;
-};
+// Top-level application state, passed via glfwSetWindowUserPointer where needed.
+// Expanded as the project grows.
+struct AppState {};

@@ -1,0 +1,33 @@
+BasedOnStyle: LLVM
+IndentWidth: 2
+TabWidth: 2
+UseTab: Never
+ColumnLimit: 100
+
+BreakBeforeBraces: Attach
+QualifierAlignment: Left
+PointerAlignment: Left
+
+BreakConstructorInitializers: BeforeComma
+PackConstructorInitializers: CurrentLine
+
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+BinPackArguments: true
+BinPackParameters: true
+AlignAfterOpenBracket: Align
+
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
+IncludeCategories:
+  - Regex: '<glad/.*>'
+    Priority: -1
+  - Regex: '<GLFW/.*>'
+    Priority: 0
+  - Regex: '".*"'
+    Priority: 1
+  - Regex: '<.*>'
+    Priority: 2
