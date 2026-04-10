@@ -74,5 +74,22 @@ Catch2 v3 with headless GL context fixture (`gl_test_fixture.hpp`). Tests skip g
 
 ## Style
 
+### Formatting & Includes
+
 - `.clang-format`: LLVM base, 2-space indent, 100-col limit, attached braces, left pointer/qualifier alignment
 - Include ordering: glad/GLFW first (priority -1/0), project headers second, STL last
+
+### Namespacing
+
+- All code in `namespace audio` for types under `src/audio/` — keeps subsystem types cleanly isolated, avoids collisions as project grows. Example: `audio::AudioCapture`, `audio::RingBuffer<>`.
+
+### Const Correctness
+
+- Use `const` on local variables and member functions where natural and not onerous. Apply it to any non-mutating member function.
+- **Do NOT** use `const` on by-value function parameters — it's an implementation detail and adds noise without enforcement.
+
+### Naming & Patterns
+
+- Constants in `k` prefix: `kRingCapacity`, `kMaxComputeSharedMemory` (will be expanded as project grows — capture naming patterns here as they're established).
+- GPU shader names are descriptive task names: `window_r2c.comp`, `magnitude.comp`, `waterfall_update.comp`.
+- Compile-time constants for shader configuration: `FFT_N`, `FFT_LOG2_N`, `FFT_LOCAL_SIZE` injected via preamble.
