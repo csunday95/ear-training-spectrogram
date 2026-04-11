@@ -1,0 +1,65 @@
+#version 450 core
+
+// FFT_N, FFT_LOG2_N, FFT_LOCAL_SIZE injected via preamble at load time.
+
+layout(local_size_x = FFT_LOCAL_SIZE) in;
+
+// Input: real audio samples, already Hann-windowed and bit-reversed by the CPU.
+// Bit-reversed order means DIT butterfly produces natural-order output directly.
+layout(std430, binding = 0) restrict readonly buffer AudioBuffer {
+  float audio_in[];
+};
+
+// Output: complex FFT result in natural (sequential) frequency order.
+layout(std430, binding = 1) restrict writeonly buffer ComplexBufferOut {
+  vec2 complex_out[];
+};
+
+// In-place working set. FFT_N × 8 bytes (32 KB for N=4096).
+shared vec2 buf[FFT_N];
+
+vec2 cmul(vec2 a, vec2 b) {
+  return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+void main() {
+  uint tid = gl_LocalInvocationID.x;
+  float pi = acos(-1.0);
+
+  // Lift real (bit-reversed) input to complex.
+  for (uint i = tid; i < FFT_N; i += FFT_LOCAL_SIZE)
+    buf[i] = vec2(audio_in[i], 0.0);
+
+  barrier();
+  memoryBarrierShared();
+
+  // Cooley-Tukey DIT butterfly. Because the input is bit-reversed, each stage
+  // operates on naturally-ordered sub-results and the final output is in natural
+  // frequency order — no post-permutation needed.
+  for (uint stage = 0u; stage < FFT_LOG2_N; ++stage) {
+    uint m      = 1u << (stage + 1u);
+    uint m_half = 1u << stage;
+
+    for (uint k = tid; k < FFT_N / 2u; k += FFT_LOCAL_SIZE) {
+      uint b_idx  = k % m_half;
+      uint b_base = (k / m_half) * m;
+      uint i0 = b_base + b_idx;
+      uint i1 = b_base + b_idx + m_half;
+
+      // Twiddle factor: W_N^{b_idx} for this stage's butterfly span m.
+      float angle = -2.0 * pi * float(b_idx) / float(m);
+      vec2 w = vec2(cos(angle), sin(angle));
+
+      vec2 a = buf[i0];
+      vec2 b = cmul(w, buf[i1]);
+      buf[i0] = a + b;
+      buf[i1] = a - b;
+    }
+
+    barrier();
+    memoryBarrierShared();
+  }
+
+  for (uint i = tid; i < FFT_N; i += FFT_LOCAL_SIZE)
+    complex_out[i] = buf[i];
+}

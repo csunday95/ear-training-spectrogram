@@ -1,5 +1,6 @@
 #pragma once
 
+#include <catch2/catch_test_macros.hpp>
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
@@ -10,7 +11,7 @@
 // Lives until process exit (Catch2 owns the lifetime).
 //
 // Usage in tests:
-//   if (!is_gl_available()) SKIP("No GL context available");
+//   REQUIRE_GL();  // skips the test case if no GL context is available
 //
 inline GLFWwindow*& gl_test_window() {
   static GLFWwindow* window = nullptr;
@@ -28,3 +29,11 @@ inline bool is_gl_available() {
   }
   return success;
 }
+
+// Skip the enclosing TEST_CASE if no headless GL context is available.
+#define REQUIRE_GL()                           \
+  do {                                         \
+    if (!is_gl_available()) {                  \
+      SKIP("No GL context");                   \
+    }                                          \
+  } while (0)

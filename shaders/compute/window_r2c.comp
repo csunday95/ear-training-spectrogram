@@ -1,0 +1,36 @@
+#version 450 core
+
+// FFT_N, FFT_LOG2_N, FFT_LOCAL_SIZE injected via preamble at load time.
+//
+// Phase 1: windowing + bit-reversal is done on the CPU before upload, so this
+// shader is not dispatched.  Phase 4 (50% overlap) reintroduces it: when a
+// sample appears at different positions in adjacent overlapping frames its
+// bit-reversed slot changes each frame, making CPU pre-reversal impractical.
+
+layout(local_size_x = FFT_LOCAL_SIZE) in;
+
+// Input: audio samples
+layout(std430, binding = 0) restrict readonly buffer AudioBuffer {
+  float audio[];
+};
+
+// Output: complex samples (real, imag)
+layout(std430, binding = 1) restrict writeonly buffer ComplexBuffer {
+  vec2 complex_out[];
+};
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  if (i >= FFT_N)
+    return;
+
+  // Hann window: w[n] = 0.5 * (1 - cos(2π*n/(N-1)))
+  float n = float(i);
+  float N_minus_1 = float(FFT_N - 1);
+  float pi = acos(-1.0);
+  float window = 0.5 * (1.0 - cos(2.0 * pi * n / N_minus_1));
+
+  // Apply window to audio sample and store as complex (windowed_sample, 0)
+  float windowed = audio[i] * window;
+  complex_out[i] = vec2(windowed, 0.0);
+}

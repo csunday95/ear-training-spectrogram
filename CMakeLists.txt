@@ -95,6 +95,7 @@ add_executable(ear_training
     src/core/shader.cpp
     src/core/gl_init.cpp
     src/audio/audio_capture.cpp
+    src/audio/fft_config.cpp
     src/audio/miniaudio_impl.cpp
 )
 
@@ -138,8 +139,10 @@ FetchContent_MakeAvailable(Catch2)
 add_executable(app_tests
     tests/test_shader_loading.cpp
     tests/test_ring_buffer.cpp
+    tests/test_fft.cpp
     src/core/shader.cpp
     src/core/gl_init.cpp
+    src/audio/fft_config.cpp
 )
 target_include_directories(app_tests PRIVATE src/core src/audio)
 target_link_libraries(app_tests PRIVATE Catch2::Catch2WithMain glad glfw)
