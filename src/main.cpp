@@ -1,15 +1,13 @@
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
-
 #include <CLI/CLI.hpp>
 
 #include "audio_capture.hpp"
 #include "gl_init.hpp"
 #include "log.hpp"
+#include "ui/imgui_renderer.hpp"
+#include "ui/waveform_widget.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -44,12 +42,9 @@ int main(int argc, char** argv) {
     if (!window)
         return 1;
 
-    // --- ImGui ---
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 450");
-    ImGui::StyleColorsDark();
+    // --- UI ---
+    ui::ImGuiRenderer imgui{window, "#version 450"};
+    ui::WaveformWidget waveform_widget;
 
     // --- Audio ---
     audio::AudioCapture capture;
@@ -94,38 +89,25 @@ int main(int argc, char** argv) {
         glViewport(0, 0, fb_w, fb_h);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // --- ImGui ---
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
+        // --- UI ---
+        imgui.begin_frame();
 
-        ImGui::SetNextWindowPos({10.f, 10.f}, ImGuiCond_Always);
-        ImGui::SetNextWindowSize({static_cast<float>(fb_w) - 20.f, 160.f}, ImGuiCond_Always);
-        if (ImGui::Begin("Waveform", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-            ImGui::Text("Audio: %s | Ring: %u samples available",
-                        capture.running() ? "running" : "stopped",
-                        capture.ring().available());
-            ImGui::PlotLines("##wave", waveform.data(), static_cast<int>(waveform.size()),
-                             0, nullptr, -1.f, 1.f,
-                             {ImGui::GetContentRegionAvail().x, 100.f});
-        }
-        ImGui::End();
+        ui::FrameData frame{
+            .waveform           = waveform,
+            .framebuffer_width  = fb_w,
+            .framebuffer_height = fb_h,
+        };
+        waveform_widget.draw(frame);
 
-        ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        imgui.end_frame();
 
         glfwSwapBuffers(window);
     }
 
     // --- Cleanup ---
     capture.stop();
+    // imgui and window cleanup handled by RAII destructors above
 
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-
-    glfwMakeContextCurrent(nullptr);
-    glfwDestroyWindow(window);
     glfwTerminate();
 
     return 0;

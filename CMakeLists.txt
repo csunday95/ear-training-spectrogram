@@ -97,9 +97,11 @@ add_executable(ear_training
     src/audio/audio_capture.cpp
     src/audio/fft_config.cpp
     src/audio/miniaudio_impl.cpp
+    src/ui/imgui_renderer.cpp
+    src/ui/waveform_widget.cpp
 )
 
-target_include_directories(ear_training PRIVATE src/core src/audio)
+target_include_directories(ear_training PRIVATE src/core src/audio src/ui)
 target_link_libraries(ear_training PRIVATE glad glfw glm::glm CLI11::CLI11 imgui_lib miniaudio)
 target_compile_options(ear_training PRIVATE ${COMMON_WARNINGS})
 # miniaudio is third-party — suppress warnings for its implementation TU only
