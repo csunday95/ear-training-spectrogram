@@ -22,7 +22,8 @@ struct AppConfig {
   uint32_t max_peaks;
   // Tuner smoother
   float    ema_alpha;        // EMA weight for new cents value; lower = smoother
-  uint32_t stability_frames; // consecutive same-note frames before committing to display
+  uint32_t stability_frames; // consecutive frames within gate_cents before committing
+  float    gate_cents;       // frequency jump threshold (cents) that resets the gate
 };
 
 // Load AppConfig from a JSON file at path.

@@ -25,6 +25,7 @@ constexpr float    kDefaultMaxHwhmBins     = 8.f;
 constexpr uint32_t kDefaultMaxPeaks        = 8u;
 constexpr float    kDefaultEmaAlpha        = 0.3f;
 constexpr uint32_t kDefaultStabilityFrames = 4u;
+constexpr float    kDefaultGateCents       = 80.0f;
 
 // Warn about any key in `section` that is not in `known`.
 void warn_unknown_keys(const nlohmann::json&                    section,
@@ -68,7 +69,8 @@ void write_default_config(const std::string& path, const AppConfig& cfg) {
         {"max_peaks", cfg.max_peaks}}},
       {"tuner_smoother",
        {{"ema_alpha", cfg.ema_alpha},
-        {"stability_frames", cfg.stability_frames}}},
+        {"stability_frames", cfg.stability_frames},
+        {"gate_cents", cfg.gate_cents}}},
   };
   std::ofstream out{path};
   if (out) {
@@ -96,6 +98,7 @@ AppConfig load_app_config(const std::string& path) {
       .max_peaks         = kDefaultMaxPeaks,
       .ema_alpha         = kDefaultEmaAlpha,
       .stability_frames  = kDefaultStabilityFrames,
+      .gate_cents        = kDefaultGateCents,
   };
 
   std::ifstream file{path};
@@ -154,9 +157,10 @@ AppConfig load_app_config(const std::string& path) {
   }
   if (j.contains("tuner_smoother")) {
     const auto& t = j["tuner_smoother"];
-    warn_unknown_keys(t, "tuner_smoother", {"ema_alpha", "stability_frames"});
+    warn_unknown_keys(t, "tuner_smoother", {"ema_alpha", "stability_frames", "gate_cents"});
     cfg.ema_alpha        = t.value("ema_alpha",        cfg.ema_alpha);
     cfg.stability_frames = t.value("stability_frames", cfg.stability_frames);
+    cfg.gate_cents       = t.value("gate_cents",       cfg.gate_cents);
   }
 
   return cfg;

@@ -21,29 +21,41 @@ class PitchSmoother {
 public:
   // Returns EMA-smoothed cents when locked, nullopt during the gate period or
   // when no pitch is present.
+  //
+  // Gate logic: the candidate frequency tracks the detected pitch each frame.
+  // If the new detection is within gate_cents of the previous frame's frequency
+  // the stability counter increments; a jump larger than gate_cents resets it.
+  // This tolerates slow vocal drift without resetting, while still reacting to
+  // genuine note changes.
   [[nodiscard]] std::optional<float> update(
       const std::optional<DetectionResult>& raw,
       float    ema_alpha,
-      uint32_t stability_frames) {
+      uint32_t stability_frames,
+      float    gate_cents) {
     if (!raw || raw->peaks.empty()) {
       candidate_count_ = 0;
       locked_          = false;
       return std::nullopt;
     }
 
-    const NoteInfo note      = freq_to_note(raw->peaks[0].frequency);
+    const float    raw_freq  = raw->peaks[0].frequency;
+    const NoteInfo note      = freq_to_note(raw_freq);
     const float    raw_cents = note.cents_offset;
-    const uint8_t  midi      = note.midi_note;
 
-    if (midi == candidate_midi_) {
-      if (candidate_count_ < stability_frames) {
-        ++candidate_count_;
-      }
-    } else {
-      candidate_midi_  = midi;
+    // On the first call after silence, candidate_count_ == 0 so we always
+    // treat the detection as a new candidate.
+    const float cents_distance = (candidate_count_ == 0)
+        ? gate_cents + 1.0f
+        : std::abs(1200.0f * std::log2(raw_freq / candidate_freq_));
+
+    if (cents_distance >= gate_cents) {
       candidate_count_ = 1;
       locked_          = false;
+    } else if (candidate_count_ < stability_frames) {
+      ++candidate_count_;
     }
+    // Always update so the window follows slow pitch drift.
+    candidate_freq_ = raw_freq;
 
     if (candidate_count_ >= stability_frames) {
       if (!locked_) {
@@ -58,7 +70,7 @@ public:
   }
 
 private:
-  uint8_t  candidate_midi_{0};
+  float    candidate_freq_{0.0f};
   uint32_t candidate_count_{0};
   bool     locked_{false};
   float    locked_cents_{0.0f};

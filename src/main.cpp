@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
                                  : std::optional<audio::DetectionResult>{detection};
 
     const std::optional<float> smoothed_cents =
-        smoother.update(raw_pitch, cfg.ema_alpha, cfg.stability_frames);
+        smoother.update(raw_pitch, cfg.ema_alpha, cfg.stability_frames, cfg.gate_cents);
 
     // Pitch is only forwarded to the UI once the stability gate has committed.
     std::optional<audio::DetectionResult> display_pitch;
