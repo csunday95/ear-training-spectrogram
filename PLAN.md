@@ -16,6 +16,7 @@ This repo is a copy of an OpenGL 4.5 compute shader particle simulation template
 - **Phase 0.5 (UI subsystem)**: Complete ✓ — ImGui extracted into `src/ui/`, Widget ABC + `FrameData` established
 - **Phase 1 (partial)**: Complete ✓ — `fft_config.hpp/cpp`, `shaders/compute/` shaders, all FFT tests passing. Remaining: SSBO setup + compute dispatch in `main.cpp`.
 - **Phase 2**: Complete ✓ — `GpuPipeline` class, full compute chain + waterfall/spectrum rendering, dB normalization, configurable display range and spectrum headroom.
+- **Phase 3**: Complete ✓ — pitch detection, music theory, EMA smoother with frequency-proximity gate, tuner band widget, JSON app config.
 
 ---
 
@@ -135,33 +136,32 @@ All tests use headless GL context. Upload known signal → run full compute pipe
 - `shaders/render/spectrum.vert/.frag` — Reads magnitude or max-hold SSBO via `gl_VertexID`; two `GL_LINE_STRIP` draws per frame. `spectrum_scale` uniform (location 4) controls fraction of panel height `db_max` maps to.
 
 ### Screen Layout
-- **Top ~65%**: Waterfall, time scrolling L→R, frequency bottom→top
-- **Bottom ~35%**: Spectrum — current magnitude (bright green) + max-hold envelope (dim yellow)
+- **Top 40%**: Waterfall, time scrolling L→R, frequency bottom→top
+- **Middle 20%**: Tuner band (added in Phase 3)
+- **Bottom 40%**: Spectrum — current magnitude (bright green) + max-hold envelope (dim yellow)
 - ImGui waveform overlay composites on top
 
-### CLI args added
-- `--db-min` / `--db-max` (default −80 / 0): dB display range
-- `--spectrum-scale` (default 0.9): fraction of spectrum panel height `db_max` occupies
-- `--wave-width` / `--wave-height` / `--wave-margin`: waveform overlay sizing
+### CLI args / config
+Display range and panel sizing are loaded from `ear_training.json` (written on first run with defaults). Key fields: `db_min`, `db_max`, `spectrum_scale`, `spectrum_fraction`, `tuner_fraction`; waveform overlay `width`/`height`/`margin`.
 
 ---
 
-## Phase 3: Note Detection + Tuner
+## Phase 3: Note Detection + Tuner ✓
 
 **Goal**: Detect dominant pitch, show note name + cents deviation, render tuner bar.
 
-### Create
-- `src/audio/music_theory.hpp` — `freq_to_note(float hz) → NoteInfo { midi_note, name, frequency, cents_offset }`. `cents = 1200 * log2(freq / ref_freq)`.
-- `src/audio/pitch_detect.hpp/.cpp` — FFT peak picking on persistent-mapped magnitude buffer. Parabolic interpolation (`k + 0.5*(m[k-1]-m[k+1])/(m[k-1]-2*m[k]+m[k+1])`). Returns `DetectionResult` with multiple `DetectedPeak`s (future-proofing for chords).
-- `tests/test_music_theory.cpp` — Verify freq↔note for A4=440, C4≈261.63, etc.
+### Created
+- `src/audio/music_theory.hpp` — `freq_to_note(float hz) → NoteInfo { midi_note, octave, name, frequency, cents_offset }`. `cents = 1200 * log2(freq / ref_freq)`.
+- `src/audio/pitch_detect.hpp/.cpp` — FFT peak picking on persistent-mapped magnitude buffer. Parabolic interpolation + HWHM width filter to reject broadband noise. Returns `DetectionResult` with sorted `DetectedPeak`s.
+- `src/audio/pitch_smoother.hpp` — Header-only `PitchSmoother` class. EMA on cents + frequency-proximity stability gate: requires `stability_frames` consecutive frames within `gate_cents` of the previous frame's frequency before committing. Gate resets on silence or a jump larger than `gate_cents`; tracks slow vocal drift without resetting.
+- `src/core/app_config.hpp/.cpp` — `AppConfig` struct loaded from `ear_training.json` via nlohmann/json. Written with defaults on first run. Sections: `display`, `waveform_overlay`, `pitch_detection`, `tuner_smoother`.
+- `src/ui/tuner_widget.hpp/.cpp` — Full-width horizontal band (middle 20% of framebuffer). When locked: gradient bar (blue→green→red), tick marks at 0/±25/±50 ¢, needle at smoothed cents, note name + Hz + cents readout. When silent/gating: "--". Transparent overlay on spectrum panel shows a triangle marker at the dominant peak's x-position.
+- `tests/test_music_theory.cpp`, `tests/test_pitch_detect.cpp` — freq↔note correctness; headless GL pipeline tests for peak picking on known sinusoids.
 
-### Tuner Widget (ImGui custom draw)
-- Horizontal bar, centered = in-tune. Tick marks at ±50, ±25, 0 cents.
-- Color gradient: blue (flat) → green (center) → red (sharp).
-- Large note name + Hz and cents readout.
-
-### Spectrum Arrow Overlay
-- At detected frequency x-position: `←` or `→` arrow via `ImGui::AddTriangleFilled`, same color as tuner.
+### Modified
+- `src/ui/frame_data.hpp` — Added `std::optional<audio::DetectionResult> pitch` (nullopt during gate or silence) and `float smoothed_cents`.
+- `src/core/gpu_pipeline.hpp/.cpp` — `spectrum_fraction_` and `tuner_fraction_` runtime parameters (replaced compile-time constant). `render()` computes waterfall/tuner/spectrum viewports from these fractions.
+- `src/core/gl_init.hpp/.cpp` — Added `GlfwGuard` struct; its destructor calls `glfwTerminate()`. Declared first in `main()` so it is destroyed last, after `GpuPipeline` and `ImGuiRenderer` RAII destructors.
 
 ---
 
@@ -199,16 +199,22 @@ Amplitude envelope state machine tracking RMS over ~200ms. Sharp onset → piano
 src/
   main.cpp
   core/
+    app_config.hpp/.cpp     — JSON config loader (ear_training.json)
     app_state.hpp, gl_init.hpp/.cpp, shader.hpp/.cpp, log.hpp
   audio/
     ring_buffer.hpp, audio_capture.hpp/.cpp, miniaudio_impl.cpp
-    fft_config.hpp/.cpp, pitch_detect.hpp/.cpp, music_theory.hpp
-    yin.hpp/.cpp, interval.hpp/.cpp
+    fft_config.hpp/.cpp
+    music_theory.hpp        — freq_to_note(), NoteInfo
+    pitch_detect.hpp/.cpp   — FFT peak picking, parabolic interp, HWHM filter
+    pitch_smoother.hpp      — EMA + frequency-proximity stability gate
+    yin.hpp/.cpp            — (Phase 5)
+    interval.hpp/.cpp       — (Phase 6)
   ui/
-    frame_data.hpp          — per-frame state struct (waveform span, fb dims; Phase 2+ FFT/pitch)
+    frame_data.hpp          — per-frame state: waveform, fb dims, pitch, smoothed_cents
     widget.hpp              — abstract Widget base class
     imgui_renderer.hpp/.cpp — RAII ImGui context wrapper
-    waveform_widget.hpp/.cpp — temporary PlotLines widget (replaced in Phase 2)
+    waveform_widget.hpp/.cpp
+    tuner_widget.hpp/.cpp   — full-width tuner band + spectrum triangle marker
 shaders/
   compute/
     window_r2c.comp, fft.comp, magnitude.comp
@@ -217,7 +223,7 @@ shaders/
     waterfall.vert/.frag, spectrum.vert/.frag
 tests/
   gl_test_fixture.hpp       — headless GL fixture + REQUIRE_GL() macro
-  test_ring_buffer.cpp, test_fft.cpp
-  test_shader_loading.cpp
-  test_music_theory.cpp, test_yin.cpp
+  test_ring_buffer.cpp, test_shader_loading.cpp, test_fft.cpp
+  test_music_theory.cpp, test_pitch_detect.cpp
+  test_yin.cpp              — (Phase 5)
 ```
