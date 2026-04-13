@@ -4,8 +4,10 @@
 
 layout(local_size_x = FFT_LOCAL_SIZE) in;
 
-// Scaling factor for magnitude (should be configured based on window and expected levels)
-uniform float mag_scale = 1.0;
+// Normalisation factor set by the CPU.
+// mag_scale = 2 / fft_n normalises so that a full-scale (±1) sine at a bin
+// centre produces 0 dB.  With Hann windowing the actual peak is ~−6 dB.
+layout(location = 0) uniform float mag_scale;
 
 // Input: complex samples from FFT
 layout(std430, binding = 0) restrict readonly buffer ComplexBuffer {

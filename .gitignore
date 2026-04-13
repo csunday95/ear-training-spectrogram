@@ -16,6 +16,9 @@ Thumbs.db
 # ImGui
 imgui.ini
 
+# Runtime-generated config
+ear_training.json
+
 # Claude Code
 .claude/*
 !.claude/CLAUDE.md

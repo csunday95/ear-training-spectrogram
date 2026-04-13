@@ -63,6 +63,17 @@ target_link_libraries(imgui_lib PUBLIC glfw)
 add_library(glad STATIC deps/glad/src/gl.c)
 target_include_directories(glad SYSTEM PUBLIC deps/glad/include)
 
+# nlohmann/json (header-only JSON for config file loading)
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG        v3.11.3
+    GIT_SHALLOW    TRUE
+)
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+set(JSON_Install    OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # miniaudio (single-header, header-only interface target)
 FetchContent_Declare(
     miniaudio
@@ -94,14 +105,20 @@ add_executable(ear_training
     src/main.cpp
     src/core/shader.cpp
     src/core/gl_init.cpp
+    src/core/gpu_pipeline.cpp
+    src/core/app_config.cpp
     src/audio/audio_capture.cpp
     src/audio/fft_config.cpp
+    src/audio/pitch_detect.cpp
     src/audio/miniaudio_impl.cpp
     src/ui/imgui_renderer.cpp
     src/ui/waveform_widget.cpp
+    src/ui/tuner_widget.cpp
 )
 
 target_include_directories(ear_training PRIVATE src/core src/audio src/ui)
+# nlohmann/json added as SYSTEM to suppress warnings from its headers
+target_include_directories(ear_training SYSTEM PRIVATE ${nlohmann_json_SOURCE_DIR}/include)
 target_link_libraries(ear_training PRIVATE glad glfw glm::glm CLI11::CLI11 imgui_lib miniaudio)
 target_compile_options(ear_training PRIVATE ${COMMON_WARNINGS})
 # miniaudio is third-party — suppress warnings for its implementation TU only
@@ -142,9 +159,12 @@ add_executable(app_tests
     tests/test_shader_loading.cpp
     tests/test_ring_buffer.cpp
     tests/test_fft.cpp
+    tests/test_music_theory.cpp
+    tests/test_pitch_detect.cpp
     src/core/shader.cpp
     src/core/gl_init.cpp
     src/audio/fft_config.cpp
+    src/audio/pitch_detect.cpp
 )
 target_include_directories(app_tests PRIVATE src/core src/audio)
 target_link_libraries(app_tests PRIVATE Catch2::Catch2WithMain glad glfw)

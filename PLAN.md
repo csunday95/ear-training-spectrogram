@@ -13,6 +13,9 @@ This repo is a copy of an OpenGL 4.5 compute shader particle simulation template
 
 ### Status
 - **Phase 0**: Complete ✓ — audio capture, ring buffer, waveform display, all tests passing
+- **Phase 0.5 (UI subsystem)**: Complete ✓ — ImGui extracted into `src/ui/`, Widget ABC + `FrameData` established
+- **Phase 1 (partial)**: Complete ✓ — `fft_config.hpp/cpp`, `shaders/compute/` shaders, all FFT tests passing. Remaining: SSBO setup + compute dispatch in `main.cpp`.
+- **Phase 2**: Complete ✓ — `GpuPipeline` class, full compute chain + waterfall/spectrum rendering, dB normalization, configurable display range and spectrum headroom.
 
 ---
 
@@ -23,6 +26,27 @@ These apply across all phases:
 - **`.clang-format`** — LLVM-based, 2-space indent, 100-col limit, attached braces, left-aligned pointers, include sorting with glad/GLFW priority.
 - **`CLAUDE.md`** — Update as architecture evolves. Add new build targets, shader pipeline docs, audio subsystem notes. Keep it accurate to current state after each phase.
 - **Style conventions** — `namespace audio` for all types in `src/audio/`. `const` on local variables where not onerous, not on by-value function parameters.
+
+---
+
+## Phase 0.5: UI Subsystem + Widget ABC ✓
+
+**Goal**: Extract ImGui lifecycle and widget drawing from `main.cpp` into a clean, extensible subsystem.
+
+### Created
+- `src/ui/frame_data.hpp` — `FrameData` struct: per-frame state passed by `const&` to all widget `draw()` calls. No default values. Extensible: Phase 2 adds FFT magnitude pointer, Phase 3 adds pitch/capture state.
+- `src/ui/widget.hpp` — Abstract base class. All widgets inherit and implement `void draw(const FrameData& frame) = 0`. Non-copyable/movable.
+- `src/ui/imgui_renderer.hpp/cpp` — RAII wrapper: constructor inits ImGui context + backends, destructor tears down. `begin_frame()` / `end_frame()` called each loop iteration.
+- `src/ui/waveform_widget.hpp/cpp` — Concrete `Widget` subclass. Wraps `ImGui::Begin/PlotLines/End`. Temporary — replaced in Phase 2. Constants in anonymous namespace (`kWindowX`, `kWindowY`, etc.).
+
+### Modified
+- `src/main.cpp` — Removed inline ImGui boilerplate; uses `ImGuiRenderer` + `WaveformWidget`. Render loop builds `FrameData` and calls `waveform_widget.draw(frame)`.
+- `CMakeLists.txt` — Added `src/ui/` to sources and include directories; kept `copy_shaders` copying both `shaders/compute` and `shaders/render`.
+- `shaders/render/.gitkeep` — Tracks the (currently empty) `shaders/render/` directory so CI's `copy_directory` step succeeds.
+- `tests/gl_test_fixture.hpp` — Added `REQUIRE_GL()` macro (single-line replacement for 3-line skip boilerplate).
+
+### Widget pattern for future phases
+All future widgets (`WaterfallWidget`, `SpectrumWidget`, `TunerWidget`) inherit from `Widget`. Only `FrameData` grows — widget `draw()` signatures never change.
 
 ---
 
@@ -48,16 +72,19 @@ These apply across all phases:
 
 ---
 
-## Phase 1: GPU FFT Pipeline
+## Phase 1: GPU FFT Pipeline (partial ✓)
 
 **Goal**: Window → FFT → magnitude, all on GPU compute shaders. Validate with ImGui spectrum plot (persistent-mapped readback).
 
-### Create
+### Done ✓
 - `shaders/compute/window_r2c.comp` — Hann window + real→complex. Reads `float audio[]` (binding 0), writes `vec2 complex_out[]` (binding 1). Uses preamble `FFT_N`.
-- `shaders/compute/fft.comp` — Adapted from `pm_fft.comp`: strip `global_index()` 3D indexing → flat 1D (`src[i0]`/`dst[i1]`). Keep `uniform uint inverse`. Single workgroup per dispatch. Preamble: `FFT_N`, `FFT_LOG2_N`, `FFT_LOCAL_SIZE`.
-- `shaders/compute/magnitude.comp` — `mag = sqrt(re² + im²)` → dB conversion. Reads FFT output (binding 0), writes `float magnitude[]` (binding 1). `uniform float mag_scale`.
-- `src/audio/fft_config.hpp` — `FFTConfig` struct: `fft_n`, `log2_n`, `local_size`, `preamble()` method generating `#define` strings. Factory `make_fft_config(uint32_t n)` validates power-of-2. Queries `GL_MAX_COMPUTE_SHARED_MEMORY_SIZE` to cap FFT_N (needs 2×N×8 bytes shared mem).
-- `tests/test_fft.cpp` — Headless GL: upload known signals, run full pipeline, readback magnitude, assert.
+- `shaders/compute/fft.comp` — Adapted from `pm_fft.comp`: strip `global_index()` 3D indexing → flat 1D. Single workgroup per dispatch. Preamble: `FFT_N`, `FFT_LOG2_N`, `FFT_LOCAL_SIZE`.
+- `shaders/compute/magnitude.comp` — Complex → dB. Reads FFT output (binding 0), writes `float magnitude[]` (binding 1). `uniform float mag_scale`.
+- `src/audio/fft_config.hpp/cpp` — `FFTConfig` struct + `make_fft_config(uint32_t n)`. Queries `GL_MAX_COMPUTE_SHARED_MEMORY_SIZE`.
+- `tests/test_fft.cpp` — 10 tests, all passing. Note: Hann sidelobe floor is **−31 dB** (not −40 dB); bins ±1 from signal are the 3-bin main lobe and skipped in sidelobe assertions.
+
+### Remaining
+- `src/main.cpp` — Create SSBOs, dispatch compute chain each frame, read magnitude via mapped pointer for ImGui plot. See SSBO layout and dispatch sections below.
 
 ### SSBO Layout
 | Buffer | Type | Size | Flags |
@@ -96,26 +123,26 @@ All tests use headless GL context. Upload known signal → run full compute pipe
 
 ---
 
-## Phase 2: Waterfall + Spectrum Rendering
+## Phase 2: Waterfall + Spectrum Rendering ✓
 
 **Goal**: Replace ImGui plots with GPU-rendered waterfall spectrogram and spectrum line chart.
 
-### Create
-- `shaders/compute/waterfall_update.comp` — Writes new magnitude column into circular-buffer R32F texture via `imageStore`. Tracks `write_col` index (no pixel shifting).
-- `shaders/compute/max_hold.comp` — `max_hold[i] = max(current[i], max_hold[i] * decay)`. Decay ~0.995/frame.
-- `shaders/render/waterfall.vert` — Fullscreen triangle (3 vertices, no VBO, `gl_VertexID` trick).
-- `shaders/render/waterfall.frag` — Reads circular-buffer texture with `write_col` unwrapping. Colormap. `uniform uint write_col, waterfall_width`.
-- `shaders/render/spectrum.vert` — Reads magnitude SSBO via `gl_VertexID`. Maps bin→x, dB→y into viewport sub-region.
-- `shaders/render/spectrum.frag` — Solid line color.
+### Created
+- `src/core/gpu_pipeline.hpp/.cpp` — Encapsulates all GPU resources and per-frame dispatch/render. `const GLuint` handles initialised in constructor init list via static helpers. Constructor takes `initial_fb_w`, `db_min`, `db_max`, `spectrum_scale`.
+- `shaders/compute/waterfall_update.comp` — `imageStore` into circular-buffer R32F texture at `write_col`.
+- `shaders/compute/max_hold.comp` — `max_hold[i] = max(magnitude[i], max_hold[i] - decay_db)` (subtractive dB decay).
+- `shaders/render/waterfall.vert/.frag` — Fullscreen triangle via `gl_VertexID`; fragment unwraps circular buffer with `fract(write_col/width + tc.x)` + `GL_REPEAT` wrap-S. Hot colormap.
+- `shaders/render/spectrum.vert/.frag` — Reads magnitude or max-hold SSBO via `gl_VertexID`; two `GL_LINE_STRIP` draws per frame. `spectrum_scale` uniform (location 4) controls fraction of panel height `db_max` maps to.
 
 ### Screen Layout
-- **Top ~65%**: Waterfall (time scrolling L→R, frequency bottom→top)
-- **Bottom ~35%**: Live spectrum (GL_LINE_STRIP) + max-hold envelope (second line strip, dimmer)
-- Visual layout iterated after MVP inspection.
+- **Top ~65%**: Waterfall, time scrolling L→R, frequency bottom→top
+- **Bottom ~35%**: Spectrum — current magnitude (bright green) + max-hold envelope (dim yellow)
+- ImGui waveform overlay composites on top
 
-### Waterfall Texture
-- `GL_TEXTURE_2D`, `GL_R32F`, 1024 × (FFT_N/2+1). ~4MB. `image2D` for compute write, `sampler2D` for fragment read.
-- `write_col` increments mod 1024 each frame — no pixel copying.
+### CLI args added
+- `--db-min` / `--db-max` (default −80 / 0): dB display range
+- `--spectrum-scale` (default 0.9): fraction of spectrum panel height `db_max` occupies
+- `--wave-width` / `--wave-height` / `--wave-margin`: waveform overlay sizing
 
 ---
 
@@ -138,13 +165,13 @@ All tests use headless GL context. Upload known signal → run full compute pipe
 
 ---
 
-## Phase 4: Overlap, Smoothing, Log-Frequency Axis
+## Phase 4: Overlap, Smoothing, Log-Frequency Axis + Spectrum Axes
 
 ### Changes
 - **50% overlap**: CPU-side `frame_buf[FFT_N]`, shift by `hop_size = FFT_N/2` each frame.
 - **Exponential smoothing**: `smoothed[i] = mix(smoothed[i], magnitude[i], alpha)` (~0.3).
 - **Log-frequency display**: `log2(freq/f_min)/log2(f_max/f_min)` mapping in waterfall.frag and spectrum.vert. Piano notes become equally spaced.
-- **Piano note labels**: ImGui text overlay at C2, C3, C4, A4, C5, etc.
+- **Spectrum axes + ticks**: Frequency (X) and dB (Y) axis lines + tick marks drawn via `ImGui::GetWindowDrawList()` overlaid on the spectrum GL viewport. No new library dependency — the GPU `GL_LINE_STRIP` rendering is preserved. Tick label positions computed from the same log-frequency mapping used in spectrum.vert so they stay aligned. Piano note labels (C2, C3, C4, A4, C5, etc.) on X; dB grid lines on Y.
 
 ---
 
@@ -175,8 +202,13 @@ src/
     app_state.hpp, gl_init.hpp/.cpp, shader.hpp/.cpp, log.hpp
   audio/
     ring_buffer.hpp, audio_capture.hpp/.cpp, miniaudio_impl.cpp
-    fft_config.hpp, pitch_detect.hpp/.cpp, music_theory.hpp
+    fft_config.hpp/.cpp, pitch_detect.hpp/.cpp, music_theory.hpp
     yin.hpp/.cpp, interval.hpp/.cpp
+  ui/
+    frame_data.hpp          — per-frame state struct (waveform span, fb dims; Phase 2+ FFT/pitch)
+    widget.hpp              — abstract Widget base class
+    imgui_renderer.hpp/.cpp — RAII ImGui context wrapper
+    waveform_widget.hpp/.cpp — temporary PlotLines widget (replaced in Phase 2)
 shaders/
   compute/
     window_r2c.comp, fft.comp, magnitude.comp
@@ -184,6 +216,8 @@ shaders/
   render/
     waterfall.vert/.frag, spectrum.vert/.frag
 tests/
-  gl_test_fixture.hpp, test_ring_buffer.cpp, test_fft.cpp
+  gl_test_fixture.hpp       — headless GL fixture + REQUIRE_GL() macro
+  test_ring_buffer.cpp, test_fft.cpp
+  test_shader_loading.cpp
   test_music_theory.cpp, test_yin.cpp
 ```

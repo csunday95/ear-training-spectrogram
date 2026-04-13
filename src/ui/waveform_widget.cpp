@@ -6,27 +6,30 @@ namespace ui {
 
 namespace {
 
-constexpr float kWindowX = 10.f;
-constexpr float kWindowY = 10.f;
-constexpr float kWindowWidthOffset = 20.f;  // margin on each side
-constexpr float kWindowHeight = 160.f;
-constexpr float kPlotHeight = 100.f;
+// Space consumed by the ImGui title bar and window padding above the plot.
+constexpr float kTitleBarPad  = 28.f;
 constexpr float kMinMagnitude = -1.f;
 constexpr float kMaxMagnitude = 1.f;
 
 }  // namespace
+
+WaveformWidget::WaveformWidget(float width, float height, float margin)
+    : width_{width}, height_{height}, margin_{margin} {}
 
 void WaveformWidget::draw(const FrameData& frame) {
   if (frame.waveform.empty()) {
     return;
   }
 
-  ImGui::SetNextWindowPos({kWindowX, kWindowY}, ImGuiCond_Always);
-  ImGui::SetNextWindowSize(
-      {static_cast<float>(frame.framebuffer_width) - kWindowWidthOffset, kWindowHeight},
+  // Anchor to the bottom-right corner, clear of the spectrum viewport below.
+  ImGui::SetNextWindowPos(
+      {static_cast<float>(frame.framebuffer_width) - width_ - margin_,
+       static_cast<float>(frame.framebuffer_height) - height_ - margin_},
       ImGuiCond_Always);
+  ImGui::SetNextWindowSize({width_, height_}, ImGuiCond_Always);
 
   if (ImGui::Begin("Waveform", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
+    const float plot_h = height_ - kTitleBarPad;
     ImGui::PlotLines(
         "##wave",
         frame.waveform.data(),
@@ -35,7 +38,7 @@ void WaveformWidget::draw(const FrameData& frame) {
         nullptr,
         kMinMagnitude,
         kMaxMagnitude,
-        {ImGui::GetContentRegionAvail().x, kPlotHeight});
+        {ImGui::GetContentRegionAvail().x, plot_h});
   }
   ImGui::End();
 }

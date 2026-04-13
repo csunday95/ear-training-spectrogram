@@ -5,23 +5,23 @@
 namespace ui {
 
 /**
- * Immediate-mode waveform display widget.
+ * Small waveform overlay widget (bottom-right corner).
  *
- * Renders a scrollable window with a PlotLines visualization of audio samples.
- * This widget is temporary (replaced in Phase 2 by GPU-rendered waterfall/spectrum)
- * but establishes the pattern for future custom widgets like TunerWidget.
- *
- * Usage (each frame, between begin_frame/end_frame):
- *   waveform_widget.draw(frame_data);
+ * Dimensions are set at construction so they can be driven from CLI args or
+ * a future grid-fraction tiling layout. No defaults — the caller is explicit.
  */
 class WaveformWidget : public Widget {
- public:
-  /**
-   * Draw the waveform window.
-   *
-   * @param frame Per-frame state including waveform samples and framebuffer dimensions.
-   */
+public:
+  // width / height: ImGui window size in pixels.
+  // margin: gap between the widget edge and the framebuffer corner.
+  WaveformWidget(float width, float height, float margin);
+
   void draw(const FrameData& frame) override;
+
+private:
+  float width_;
+  float height_;
+  float margin_;
 };
 
 }  // namespace ui

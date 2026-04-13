@@ -1,6 +1,9 @@
 #pragma once
 
+#include <optional>
 #include <span>
+
+#include "pitch_detect.hpp"
 
 namespace ui {
 
@@ -8,25 +11,18 @@ namespace ui {
  * Per-frame application state passed to all UI widgets.
  *
  * Widgets receive a const reference to FrameData in their draw() method.
- * This struct grows with each phase as new data becomes available.
- *
- * Phase 1: waveform + framebuffer size
- * Phase 2: + FFT magnitude data, waterfall texture state
- * Phase 3: + capture state, pitch detection results
  */
 struct FrameData {
-  // Phase 1
   std::span<const float> waveform;
   int framebuffer_width;
   int framebuffer_height;
 
-  // Phase 2 (reserved)
-  // const audio::Magnitude* fft_data;
+  // Nullopt when no stable pitch is detected (either no peaks above threshold,
+  // or the note-stability gate has not yet committed).
+  std::optional<audio::DetectionResult> pitch;
 
-  // Phase 3 (reserved)
-  // bool capture_running;
-  // uint32_t ring_available;
-  // float pitch_cents;
+  // EMA-smoothed cents offset for the tuner display. Valid only when pitch has a value.
+  float smoothed_cents;
 };
 
 }  // namespace ui
