@@ -12,10 +12,12 @@
 #include "pitch_detect.hpp"
 #include "pitch_smoother.hpp"
 #include "ui/imgui_renderer.hpp"
+#include "ui/spectrum_axis_widget.hpp"
 #include "ui/tuner_widget.hpp"
 #include "ui/waveform_widget.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -86,7 +88,9 @@ int main(int argc, char** argv) {
   int fb_w = 0, fb_h = 0;
   glfwGetFramebufferSize(window, &fb_w, &fb_h);
   core::GpuPipeline pipeline{*fft_cfg, fb_w, cfg.db_min, cfg.db_max,
-                             cfg.spectrum_scale, cfg.spectrum_fraction, cfg.tuner_fraction};
+                             cfg.spectrum_scale, cfg.spectrum_fraction, cfg.tuner_fraction,
+                             cfg.log_freq_min, cfg.log_freq_max, cfg.smooth_alpha,
+                             cfg.max_hold_decay_db, kSampleRate};
   if (!pipeline.ok()) {
     LOG_ERROR("GPU pipeline failed to initialise — check shader compile errors above");
     return 1;
@@ -96,6 +100,9 @@ int main(int argc, char** argv) {
   ui::ImGuiRenderer  imgui{window, "#version 450"};
   ui::WaveformWidget waveform_widget{cfg.wave_width, cfg.wave_height, cfg.wave_margin};
   ui::TunerWidget    tuner_widget{cfg.spectrum_fraction, cfg.tuner_fraction};
+  ui::SpectrumAxisWidget axis_widget{cfg.log_freq_min, cfg.log_freq_max,
+                                     cfg.db_min, cfg.db_max,
+                                     cfg.spectrum_scale, cfg.spectrum_fraction};
   audio::PitchSmoother smoother;
 
   // --- Audio ---
@@ -105,10 +112,25 @@ int main(int argc, char** argv) {
     // Continue without audio — allows visual testing without mic.
   }
 
-  // Per-frame CPU buffer for waveform display and FFT upload.
-  std::vector<float> waveform(fft_cfg->fft_n, 0.f);
+  const uint32_t fft_n    = fft_cfg->fft_n;
+  const uint32_t hop_size = fft_n / 2u;
+  const uint32_t fft_bins = fft_n / 2u + 1u;
 
-  const uint32_t fft_bins = fft_cfg->fft_n / 2u + 1u;
+  // Sliding FFT window: always fft_n samples, advanced by hop_size each dispatch.
+  std::vector<float> frame_buf(fft_n, 0.0f);
+  // Intermediate accumulator: ring buffer samples not yet consumed into frame_buf.
+  std::vector<float> accum_buf;
+  accum_buf.reserve(fft_n);
+
+  // Precompute log range for the peak x-norm computation (matches spectrum.vert).
+  const float log_freq_range =
+      std::log2(cfg.log_freq_max / cfg.log_freq_min);
+
+  // Pitch and display state — persists across frames so the tuner holds its last
+  // committed value during frames when no new hop is dispatched.
+  std::optional<audio::DetectionResult> display_pitch;
+  float smoothed_cents     = 0.0f;
+  float spectrum_peak_x    = 0.0f;  // [0, 1], aligned with log-frequency axis
 
   glClearColor(0.08f, 0.08f, 0.10f, 1.0f);
 
@@ -117,46 +139,58 @@ int main(int argc, char** argv) {
     glfwPollEvents();
 
     // --- Read audio ---
-    // Peek at the most recent fft_n samples without consuming them.
-    // If fewer are available, the waveform buffer retains prior data.
+    // Drain all available ring-buffer samples into accum_buf each frame.
+    // When accum_buf accumulates hop_size samples, advance frame_buf by one hop.
     {
-      const uint32_t avail = capture.ring().available();
-      if (avail >= fft_cfg->fft_n) {
-        // Skip old data so we're always at the tail of the ring.
-        const uint32_t skip = avail - fft_cfg->fft_n;
-        if (skip > 0u) {
-          float discard[256];
-          uint32_t remaining = skip;
-          while (remaining > 0u) {
-            const uint32_t chunk = std::min(remaining, 256u);
-            capture.ring().read(discard, chunk);
-            remaining -= chunk;
-          }
-        }
-        capture.ring().peek(waveform.data(), fft_cfg->fft_n);
-      }
+      const uint32_t avail     = capture.ring().available();
+      const size_t   prev_size = accum_buf.size();
+      accum_buf.resize(prev_size + avail);
+      capture.ring().read(accum_buf.data() + prev_size, avail);
     }
 
-    // --- GPU compute ---
-    pipeline.dispatch(waveform);
+    bool dispatched = false;
+    while (accum_buf.size() >= hop_size) {
+      // Shift frame_buf left by hop_size, then fill the right half from accum_buf.
+      std::copy(frame_buf.begin() + static_cast<ptrdiff_t>(hop_size),
+                frame_buf.end(),
+                frame_buf.begin());
+      std::copy(accum_buf.begin(),
+                accum_buf.begin() + static_cast<ptrdiff_t>(hop_size),
+                frame_buf.end() - static_cast<ptrdiff_t>(hop_size));
+      accum_buf.erase(accum_buf.begin(),
+                      accum_buf.begin() + static_cast<ptrdiff_t>(hop_size));
 
-    // --- Pitch detection ---
-    const std::span<const float> mag{pipeline.sync_get_mag_data(), fft_bins};
-    auto detection = audio::detect_peaks(
-        mag, fft_cfg->fft_n, kSampleRate, cfg.min_db, cfg.max_hwhm_bins, cfg.max_peaks);
+      // --- GPU compute ---
+      pipeline.dispatch(frame_buf);
+      dispatched = true;
+    }
 
-    // Keep a const-ref copy for the smoother (detect_peaks result is small).
-    const std::optional<audio::DetectionResult> raw_pitch =
-        detection.peaks.empty() ? std::nullopt
-                                 : std::optional<audio::DetectionResult>{detection};
+    // --- Pitch detection (only when new FFT data is available) ---
+    if (dispatched) {
+      const std::span<const float> mag{pipeline.sync_get_mag_data(), fft_bins};
+      auto detection = audio::detect_peaks(
+          mag, fft_n, kSampleRate, cfg.min_db, cfg.max_hwhm_bins, cfg.max_peaks);
 
-    const std::optional<float> smoothed_cents =
-        smoother.update(raw_pitch, cfg.ema_alpha, cfg.stability_frames, cfg.gate_cents);
+      const std::optional<audio::DetectionResult> raw_pitch =
+          detection.peaks.empty() ? std::nullopt
+                                   : std::optional<audio::DetectionResult>{detection};
 
-    // Pitch is only forwarded to the UI once the stability gate has committed.
-    std::optional<audio::DetectionResult> display_pitch;
-    if (smoothed_cents.has_value()) {
-      display_pitch = std::move(detection);
+      const std::optional<float> cents =
+          smoother.update(raw_pitch, cfg.ema_alpha, cfg.stability_frames, cfg.gate_cents);
+
+      if (cents.has_value()) {
+        display_pitch  = std::move(detection);
+        smoothed_cents = *cents;
+
+        // Map the dominant peak frequency to a log-space x-norm [0, 1].
+        if (!display_pitch->peaks.empty()) {
+          const float f = display_pitch->peaks[0].frequency;
+          spectrum_peak_x =
+              std::clamp(std::log2(f / cfg.log_freq_min) / log_freq_range, 0.0f, 1.0f);
+        }
+      } else {
+        display_pitch = std::nullopt;
+      }
     }
 
     // --- Render ---
@@ -170,14 +204,16 @@ int main(int argc, char** argv) {
     imgui.begin_frame();
 
     ui::FrameData frame{
-        .waveform           = waveform,
-        .framebuffer_width  = fb_w,
-        .framebuffer_height = fb_h,
-        .pitch              = std::move(display_pitch),
-        .smoothed_cents     = smoothed_cents.value_or(0.0f),
+        .waveform              = frame_buf,
+        .framebuffer_width     = fb_w,
+        .framebuffer_height    = fb_h,
+        .pitch                 = display_pitch,
+        .smoothed_cents        = smoothed_cents,
+        .spectrum_peak_x_norm  = spectrum_peak_x,
     };
     waveform_widget.draw(frame);
     tuner_widget.draw(frame);
+    axis_widget.draw(frame);
 
     imgui.end_frame();
 

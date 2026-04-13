@@ -28,8 +28,13 @@ public:
   //   With mag_scale = 2/fft_n normalisation, a full-scale sine hits ~0 dB.
   // spectrum_fraction / tuner_fraction: fractions of framebuffer height for the spectrum
   //   and tuner panels respectively. The waterfall takes the remainder.
+  // log_freq_min / log_freq_max: frequency bounds for the log-frequency display axis.
+  // smooth_alpha: EMA weight for the per-bin magnitude smoothing pass (0 < alpha ≤ 1).
+  // sample_rate: audio capture sample rate in Hz (used to compute the Nyquist frequency).
   GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w, float db_min, float db_max,
-              float spectrum_scale, float spectrum_fraction, float tuner_fraction);
+              float spectrum_scale, float spectrum_fraction, float tuner_fraction,
+              float log_freq_min, float log_freq_max, float smooth_alpha,
+              float max_hold_decay_db, uint32_t sample_rate);
   ~GpuPipeline();
 
   GpuPipeline(const GpuPipeline&)            = delete;
@@ -64,8 +69,7 @@ public:
 private:
   // kDbInit: value used to pre-fill max-hold SSBO and waterfall texture.
   // Must be below any realistic db_min so the display starts fully black.
-  static constexpr float kDbInit          = -120.0f;
-  static constexpr float kDecayDbPerFrame = 0.3f;
+  static constexpr float kDbInit = -120.0f;
 
   // --- Static helpers used in the constructor init list ---
 
@@ -99,6 +103,11 @@ private:
   float            spectrum_scale_;     // fraction of panel height db_max maps to
   float            spectrum_fraction_;  // fraction of fb_h for the spectrum panel
   float            tuner_fraction_;     // fraction of fb_h for the tuner band
+  float            smooth_alpha_;        // EMA weight for the magnitude smoothing pass
+  float            max_hold_decay_db_;  // dB subtracted from max-hold envelope per FFT frame
+  float            f_min_;             // minimum display frequency (Hz)
+  float            log_freq_range_;    // log2(f_max / f_min), precomputed
+  float            nyquist_;           // sample_rate / 2.0
   bool             ok_{false};
 
   // Per-frame windowed + bit-reversed scratch (avoids per-frame allocation).
@@ -109,6 +118,7 @@ private:
   const GLuint complex_ssbo_;
   const GLuint magnitude_ssbo_;
   const GLuint max_hold_ssbo_;
+  const GLuint smooth_ssbo_;   // GPU-only EMA state for per-bin magnitude smoothing
 
   // Persistent CPU mapping of magnitude_ssbo (set in constructor body).
   const float* magnitude_ptr_{nullptr};
@@ -117,6 +127,7 @@ private:
   // Compute programs — fixed after construction.
   const GLuint prog_fft_;
   const GLuint prog_magnitude_;
+  const GLuint prog_smooth_magnitude_;  // EMA smoothing pass
   const GLuint prog_max_hold_;
   const GLuint prog_waterfall_update_;
 

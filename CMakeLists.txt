@@ -114,6 +114,7 @@ add_executable(ear_training
     src/ui/imgui_renderer.cpp
     src/ui/waveform_widget.cpp
     src/ui/tuner_widget.cpp
+    src/ui/spectrum_axis_widget.cpp
 )
 
 target_include_directories(ear_training PRIVATE src/core src/audio src/ui)

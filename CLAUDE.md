@@ -41,30 +41,33 @@ CI runs on Ubuntu with `xvfb-run` for headless GL testing.
 
 - `shader.hpp/cpp` — File reading, shader compilation, program linking. `load_compute_program` injects preamble (inserts `#define`s after `#version` line) — used to pass `FFT_N`, `FFT_LOG2_N`, `FFT_LOCAL_SIZE` to compute shaders.
 - `gl_init.hpp/cpp` — GLFW window + GL 4.5 core context. `init_gl_context_headless()` for tests. `GlfwGuard` RAII struct: holds `GLFWwindow*`, destructor calls `glfwTerminate()`. Declare it **first** in `main()` so it is destroyed last (after `GpuPipeline` and `ImGuiRenderer`), preventing use-after-terminate errors.
-- `app_config.hpp/cpp` — `AppConfig` struct + `load_app_config(path)`. Reads `ear_training.json`; writes defaults on first run. Sections: `display` (db_min, db_max, spectrum_scale, spectrum_fraction, tuner_fraction), `waveform_overlay` (width, height, margin), `pitch_detection` (min_db, max_hwhm_bins, max_peaks), `tuner_smoother` (ema_alpha, stability_frames, gate_cents). Unknown keys log a warning.
+- `app_config.hpp/cpp` — `AppConfig` struct + `load_app_config(path)`. Reads `ear_training.json`; writes defaults on first run. Sections: `display` (db_min, db_max, spectrum_scale, spectrum_fraction, tuner_fraction, log_freq_min, log_freq_max, smooth_alpha), `waveform_overlay` (width, height, margin), `pitch_detection` (min_db, max_hwhm_bins, max_peaks), `tuner_smoother` (ema_alpha, stability_frames, gate_cents). Unknown keys log a warning.
 - `log.hpp` — `LOG_ERROR`/`LOG_INFO`/`LOG_WARN` macros using C++23 `std::println`.
 - `app_state.hpp` — Top-level state struct (currently empty).
 
-### GPU Pipeline (Phase 1+)
+### GPU Pipeline
 
-Compute chain per frame:
+Compute chain per frame (dispatch runs only when a full hop is available — see overlap below):
 1. `window_r2c.comp` — Hann window + real→complex (audio SSBO → complex SSBO)
 2. `fft.comp` — Stockham radix-2 FFT (adapted from gravity project). Single workgroup. Preamble: `FFT_N`, `FFT_LOG2_N`, `FFT_LOCAL_SIZE`.
 3. `magnitude.comp` — Complex → dB magnitude (complex SSBO → magnitude SSBO)
-4. `waterfall_update.comp` — Write new column into circular R32F texture
-5. `max_hold.comp` — Exponential max-hold decay on magnitude SSBO
+4. `smooth_magnitude.comp` — Per-bin EMA: `smooth[i] = mix(smooth[i], magnitude[i], alpha)` (magnitude SSBO → smooth SSBO). Alpha configurable via `display.smooth_alpha`.
+5. `max_hold.comp` — Exponential max-hold decay on smooth SSBO
+6. `waterfall_update.comp` — Write smooth SSBO column into circular R32F texture
 
 Rendering:
-- Waterfall: fullscreen triangle, circular-buffer texture with `write_col` unwrapping
-- Spectrum: `GL_LINE_STRIP` drawn from magnitude SSBO via `gl_VertexID` (no VBO)
+- Waterfall: fullscreen triangle, circular-buffer texture with `write_col` unwrapping. Log-frequency V mapping: `v = pow(2, tc.y * log_range) * f_min / nyquist`.
+- Spectrum: `GL_LINE_STRIP` drawn from smooth SSBO (bright green) and max-hold SSBO (dim yellow) via `gl_VertexID` (no VBO). Log-frequency x mapping: `t = log2(freq/f_min) / log_range`.
+- Pitch detection readback (`sync_get_mag_data()`) reads raw `magnitude_ssbo_` — not the smoothed buffer.
 
 ### UI subsystem (`src/ui/`)
 
 - `widget.hpp` — Abstract base class `Widget`. Pure `void draw(const FrameData& frame) = 0`. Non-copyable/movable.
-- `frame_data.hpp` — `FrameData` struct passed by `const&` to all widget `draw()` calls. Current fields: `waveform` (span), `framebuffer_width/height` (int), `pitch` (optional DetectionResult — nullopt when silent or gate not yet committed), `smoothed_cents` (float, valid only when pitch has a value).
+- `frame_data.hpp` — `FrameData` struct passed by `const&` to all widget `draw()` calls. Fields: `waveform` (span), `framebuffer_width/height` (int), `pitch` (optional DetectionResult — nullopt when silent or gate not yet committed), `smoothed_cents` (float, valid only when pitch has a value), `spectrum_peak_x_norm` (float [0,1] — log-frequency-mapped x of dominant peak, used by tuner triangle marker).
 - `imgui_renderer.hpp/cpp` — RAII wrapper: ctor inits ImGui + backends, dtor calls shutdown. `begin_frame()` / `end_frame()` per loop iteration.
 - `waveform_widget.hpp/cpp` — Small oscilloscope overlay, bottom-right corner.
-- `tuner_widget.hpp/cpp` — Full-width band occupying the middle `tuner_fraction` of the framebuffer. When locked: blue→green→red gradient bar, tick marks at 0/±25/±50 ¢, needle at `smoothed_cents`, note name + Hz + cents text. When silent/gating: "--". Separately draws a transparent overlay on the spectrum band with a triangle at the dominant peak's x-position. Constructed with `(spectrum_fraction, tuner_fraction)` — same values supplied to `GpuPipeline`.
+- `tuner_widget.hpp/cpp` — Full-width band occupying the middle `tuner_fraction` of the framebuffer. When locked: blue→green→red gradient bar, tick marks at 0/±25/±50 ¢, needle at `smoothed_cents`, note name + Hz + cents text. When silent/gating: "--". Separately draws a transparent overlay on the spectrum band with a triangle at the dominant peak's x-position (uses `frame.spectrum_peak_x_norm`). Constructed with `(spectrum_fraction, tuner_fraction)`.
+- `spectrum_axis_widget.hpp/cpp` — Transparent ImGui overlay on the spectrum viewport. Draws horizontal dB grid lines (every 20 dB) and vertical frequency tick labels (A0, C2 … C8) aligned with the log-frequency axis. Tick screen-x = `log2(f/f_min) / log_range * fb_w`, matching `spectrum.vert`. Constructed with `(f_min, f_max, db_min, db_max, spectrum_scale, spectrum_fraction)`.
 
 ### Screen Layout
 
@@ -77,14 +80,19 @@ Three GL panels share the framebuffer height (fractions from `AppConfig`):
 
 ### Per-frame data flow
 
+Audio is consumed with 50% overlap: `ring.read()` → `accum_buf` each render frame; when `accum_buf ≥ hop_size` (= fft_n/2), `frame_buf` advances by one hop and dispatch runs. At 44.1 kHz and fft_n=4096, this gives ~21 FFT dispatches/second independent of render frame rate.
+
 ```
-AudioCapture::ring() → waveform[fft_n]
-  → GpuPipeline::dispatch()          (GPU compute chain)
-  → GpuPipeline::sync_get_mag_data() (fence + CPU readback)
-  → detect_peaks()                   → DetectionResult
-  → PitchSmoother::update()          → optional<float> smoothed_cents
-  → FrameData{pitch, smoothed_cents} → widget draw calls
+AudioCapture::ring() → accum_buf (drained each render frame)
+  → (when accum_buf ≥ hop_size) advance frame_buf, then:
+  → GpuPipeline::dispatch(frame_buf)  (GPU compute chain)
+  → GpuPipeline::sync_get_mag_data()  (fence + CPU readback of raw magnitude)
+  → detect_peaks()                    → DetectionResult
+  → PitchSmoother::update()           → optional<float> smoothed_cents
+  → FrameData{pitch, smoothed_cents, spectrum_peak_x_norm} → widget draw calls
 ```
+
+`display_pitch`, `smoothed_cents`, and `spectrum_peak_x_norm` persist across render frames so the tuner holds its last committed value between hops.
 
 ### Shaders (`shaders/`)
 

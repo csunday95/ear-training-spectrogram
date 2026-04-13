@@ -14,6 +14,10 @@ layout(location = 1) uniform uint waterfall_width;
 // dB display range for colormap normalization.
 layout(location = 2) uniform float db_min;
 layout(location = 3) uniform float db_max;
+// Log-frequency axis parameters.
+layout(location = 4) uniform float f_min;          // minimum display frequency (Hz)
+layout(location = 5) uniform float log_freq_range; // log2(f_max / f_min)
+layout(location = 6) uniform float nyquist;        // sample_rate / 2.0
 
 // Classic "hot" colormap: black → red → yellow → white.
 vec3 colormap_hot(float t) {
@@ -30,8 +34,11 @@ void main() {
   // buffer; fract() wraps at the texture boundary (texture wrap-S is GL_REPEAT).
   float u = fract(float(write_col) / float(waterfall_width) + texcoord.x);
 
-  // texcoord.y: 0 = bottom of viewport = low frequency (DC), 1 = Nyquist.
-  float db  = texture(waterfall_tex, vec2(u, texcoord.y)).r;
+  // texcoord.y maps log-linearly from 0 (bottom = f_min) to 1 (top = f_max).
+  // Back-project to the linear texture V coordinate (0 = DC, 1 = Nyquist).
+  float freq_hz = pow(2.0, texcoord.y * log_freq_range) * f_min;
+  float v       = clamp(freq_hz / nyquist, 0.0, 1.0);
+  float db      = texture(waterfall_tex, vec2(u, v)).r;
   float t   = clamp((db - db_min) / (db_max - db_min), 0.0, 1.0);
 
   frag_color = vec4(colormap_hot(t), 1.0);

@@ -190,7 +190,7 @@ void TunerWidget::draw(const FrameData& frame) {
     const ImVec2 ov_size = ImGui::GetWindowSize();
     ImDrawList*  odl     = ImGui::GetWindowDrawList();
 
-    const float marker_x = ov_pos.x + peak.bin_normalized * ov_size.x;
+    const float marker_x = ov_pos.x + frame.spectrum_peak_x_norm * ov_size.x;
     const float base_y   = ov_pos.y + ov_size.y;
     odl->AddTriangleFilled(
         {marker_x,                      base_y - kTriangleHeight},

@@ -51,7 +51,9 @@ const float* GpuPipeline::map_magnitude(GLuint ssbo, GLsizeiptr size) {
 
 GpuPipeline::GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w,
                           float db_min, float db_max, float spectrum_scale,
-                          float spectrum_fraction, float tuner_fraction)
+                          float spectrum_fraction, float tuner_fraction,
+                          float log_freq_min, float log_freq_max, float smooth_alpha,
+                          float max_hold_decay_db, uint32_t sample_rate)
     : cfg_{cfg}
     , fft_bins_{cfg.fft_n / 2u + 1u}
     , db_min_{db_min}
@@ -60,6 +62,11 @@ GpuPipeline::GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w,
     , spectrum_scale_{spectrum_scale}
     , spectrum_fraction_{spectrum_fraction}
     , tuner_fraction_{tuner_fraction}
+    , smooth_alpha_{smooth_alpha}
+    , max_hold_decay_db_{max_hold_decay_db}
+    , f_min_{log_freq_min}
+    , log_freq_range_{std::log2(log_freq_max / log_freq_min)}
+    , nyquist_{static_cast<float>(sample_rate) * 0.5f}
     , windowed_(cfg.fft_n, 0.0f)
     , audio_ssbo_{make_ssbo(
           static_cast<GLsizeiptr>(cfg.fft_n * sizeof(float)),
@@ -71,8 +78,12 @@ GpuPipeline::GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w,
           GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)}
     , max_hold_ssbo_{make_ssbo(
           static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)), 0)}
+    , smooth_ssbo_{make_ssbo(
+          static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)), 0)}
     , prog_fft_{make_compute("shaders/compute/fft.comp", cfg.preamble())}
     , prog_magnitude_{make_compute("shaders/compute/magnitude.comp", cfg.preamble())}
+    , prog_smooth_magnitude_{make_compute("shaders/compute/smooth_magnitude.comp",
+                                          cfg.preamble())}
     , prog_max_hold_{make_compute("shaders/compute/max_hold.comp", cfg.preamble())}
     , prog_waterfall_update_{make_compute("shaders/compute/waterfall_update.comp",
                                           cfg.preamble())}
@@ -92,11 +103,12 @@ GpuPipeline::GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w,
     return;
   }
 
-  // Initialise max-hold to dB floor so the envelope starts silent.
+  // Initialise max-hold and smooth buffers to dB floor so the display starts silent.
   glClearNamedBufferData(max_hold_ssbo_, GL_R32F, GL_RED, GL_FLOAT, &kDbInit);
+  glClearNamedBufferData(smooth_ssbo_,   GL_R32F, GL_RED, GL_FLOAT, &kDbInit);
 
-  if (!prog_fft_ || !prog_magnitude_ || !prog_max_hold_ || !prog_waterfall_update_ ||
-      !prog_waterfall_render_ || !prog_spectrum_render_) {
+  if (!prog_fft_ || !prog_magnitude_ || !prog_smooth_magnitude_ || !prog_max_hold_ ||
+      !prog_waterfall_update_ || !prog_waterfall_render_ || !prog_spectrum_render_) {
     LOG_ERROR("GpuPipeline: one or more shader programs failed to load");
     return;
   }
@@ -119,13 +131,15 @@ GpuPipeline::~GpuPipeline() {
   // glDeleteProgram(0) is a no-op per spec — safe even when loading failed.
   glDeleteProgram(prog_fft_);
   glDeleteProgram(prog_magnitude_);
+  glDeleteProgram(prog_smooth_magnitude_);
   glDeleteProgram(prog_max_hold_);
   glDeleteProgram(prog_waterfall_update_);
   glDeleteProgram(prog_waterfall_render_);
   glDeleteProgram(prog_spectrum_render_);
   glDeleteTextures(1, &waterfall_tex_);
-  const GLuint bufs[] = {audio_ssbo_, complex_ssbo_, magnitude_ssbo_, max_hold_ssbo_};
-  glDeleteBuffers(4, bufs);
+  const GLuint bufs[] = {audio_ssbo_, complex_ssbo_, magnitude_ssbo_, max_hold_ssbo_,
+                         smooth_ssbo_};
+  glDeleteBuffers(5, bufs);
   glDeleteVertexArrays(1, &vao_);
 }
 
@@ -174,17 +188,26 @@ void GpuPipeline::dispatch(std::span<const float> audio) {
   glDispatchCompute(fft_dispatch, 1, 1);
   glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-  // max_hold.comp — peak-hold with per-frame dB decay.
-  glUseProgram(prog_max_hold_);
+  // smooth_magnitude.comp — EMA smoothing; output feeds the waterfall and spectrum display.
+  // Pitch detection readback still reads magnitude_ssbo_ (unsmoothed).
+  glUseProgram(prog_smooth_magnitude_);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, magnitude_ssbo_);
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, max_hold_ssbo_);
-  glProgramUniform1f(prog_max_hold_, 0, kDecayDbPerFrame);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, smooth_ssbo_);
+  glProgramUniform1f(prog_smooth_magnitude_, 0, smooth_alpha_);
   glDispatchCompute(fft_dispatch, 1, 1);
   glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-  // waterfall_update.comp — write current magnitude column into the texture.
+  // max_hold.comp — peak-hold with per-frame dB decay; reads smoothed magnitude.
+  glUseProgram(prog_max_hold_);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, smooth_ssbo_);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, max_hold_ssbo_);
+  glProgramUniform1f(prog_max_hold_, 0, max_hold_decay_db_);
+  glDispatchCompute(fft_dispatch, 1, 1);
+  glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+
+  // waterfall_update.comp — write smoothed magnitude column into the texture.
   glUseProgram(prog_waterfall_update_);
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, magnitude_ssbo_);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, smooth_ssbo_);
   glBindImageTexture(0, waterfall_tex_, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32F);
   glProgramUniform1ui(prog_waterfall_update_, 0, write_col_);
   glDispatchCompute(fft_dispatch, 1, 1);
@@ -253,18 +276,24 @@ void GpuPipeline::render(int fb_w, int fb_h) {
   glProgramUniform1ui(prog_waterfall_render_, 1, waterfall_width_);
   glProgramUniform1f(prog_waterfall_render_, 2, db_min_);
   glProgramUniform1f(prog_waterfall_render_, 3, db_max_);
+  glProgramUniform1f(prog_waterfall_render_, 4, f_min_);
+  glProgramUniform1f(prog_waterfall_render_, 5, log_freq_range_);
+  glProgramUniform1f(prog_waterfall_render_, 6, nyquist_);
   glDrawArrays(GL_TRIANGLES, 0, 3);
 
-  // --- Spectrum (bottom 35%) ---
+  // --- Spectrum (bottom panel) ---
   glViewport(0, 0, fb_w, spectrum_h);
   glUseProgram(prog_spectrum_render_);
   glProgramUniform1i(prog_spectrum_render_, 0, fft_bins);
   glProgramUniform1f(prog_spectrum_render_, 1, db_min_);
   glProgramUniform1f(prog_spectrum_render_, 2, db_max_);
   glProgramUniform1f(prog_spectrum_render_, 4, spectrum_scale_);
+  glProgramUniform1f(prog_spectrum_render_, 5, f_min_);
+  glProgramUniform1f(prog_spectrum_render_, 6, log_freq_range_);
+  glProgramUniform1f(prog_spectrum_render_, 7, nyquist_);
 
-  // Current magnitude line (bright green).
-  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, magnitude_ssbo_);
+  // Smoothed magnitude line (bright green).
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, smooth_ssbo_);
   glProgramUniform4f(prog_spectrum_render_, 3, 0.2f, 0.9f, 0.2f, 1.0f);
   glDrawArrays(GL_LINE_STRIP, 0, fft_bins);
 

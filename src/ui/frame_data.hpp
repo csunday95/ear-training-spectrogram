@@ -23,6 +23,11 @@ struct FrameData {
 
   // EMA-smoothed cents offset for the tuner display. Valid only when pitch has a value.
   float smoothed_cents;
+
+  // Log-frequency-mapped x position of the dominant peak, in [0, 1] (0=left, 1=right).
+  // Used by overlay widgets to position markers aligned with the spectrum display.
+  // Valid only when pitch has a value.
+  float spectrum_peak_x_norm;
 };
 
 }  // namespace ui

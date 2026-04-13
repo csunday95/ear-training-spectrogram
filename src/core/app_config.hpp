@@ -12,6 +12,10 @@ struct AppConfig {
   float spectrum_scale;
   float spectrum_fraction;  // fraction of framebuffer height for the spectrum panel
   float tuner_fraction;     // fraction of framebuffer height for the tuner band
+  float log_freq_min;       // minimum display frequency in Hz (log axis lower bound)
+  float log_freq_max;       // maximum display frequency in Hz (log axis upper bound)
+  float smooth_alpha;       // EMA weight for per-bin magnitude smoothing (lower = smoother)
+  float max_hold_decay_db;  // dB subtracted from max-hold envelope per FFT frame
   // Waveform overlay
   float wave_width;
   float wave_height;

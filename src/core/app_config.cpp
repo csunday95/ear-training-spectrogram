@@ -17,6 +17,10 @@ constexpr float    kDefaultDbMax           = 0.f;
 constexpr float    kDefaultSpectrumScale   = 0.9f;
 constexpr float    kDefaultSpectrumFraction = 0.40f;
 constexpr float    kDefaultTunerFraction   = 0.20f;
+constexpr float    kDefaultLogFreqMin      = 27.5f;    // A0 — lowest piano key
+constexpr float    kDefaultLogFreqMax      = 4186.0f;  // C8 — highest piano key
+constexpr float    kDefaultSmoothAlpha     = 0.3f;
+constexpr float    kDefaultMaxHoldDecayDb  = 0.4f;
 constexpr float    kDefaultWaveWidth       = 300.f;
 constexpr float    kDefaultWaveHeight      = 80.f;
 constexpr float    kDefaultWaveMargin      = 10.f;
@@ -58,7 +62,11 @@ void write_default_config(const std::string& path, const AppConfig& cfg) {
         {"db_max", cfg.db_max},
         {"spectrum_scale", cfg.spectrum_scale},
         {"spectrum_fraction", cfg.spectrum_fraction},
-        {"tuner_fraction", cfg.tuner_fraction}}},
+        {"tuner_fraction", cfg.tuner_fraction},
+        {"log_freq_min", cfg.log_freq_min},
+        {"log_freq_max", cfg.log_freq_max},
+        {"smooth_alpha", cfg.smooth_alpha},
+        {"max_hold_decay_db", cfg.max_hold_decay_db}}},
       {"waveform_overlay",
        {{"width", cfg.wave_width},
         {"height", cfg.wave_height},
@@ -90,6 +98,10 @@ AppConfig load_app_config(const std::string& path) {
       .spectrum_scale    = kDefaultSpectrumScale,
       .spectrum_fraction = kDefaultSpectrumFraction,
       .tuner_fraction    = kDefaultTunerFraction,
+      .log_freq_min      = kDefaultLogFreqMin,
+      .log_freq_max      = kDefaultLogFreqMax,
+      .smooth_alpha      = kDefaultSmoothAlpha,
+      .max_hold_decay_db = kDefaultMaxHoldDecayDb,
       .wave_width        = kDefaultWaveWidth,
       .wave_height       = kDefaultWaveHeight,
       .wave_margin       = kDefaultWaveMargin,
@@ -134,12 +146,17 @@ AppConfig load_app_config(const std::string& path) {
   if (j.contains("display")) {
     const auto& d = j["display"];
     warn_unknown_keys(d, "display",
-        {"db_min", "db_max", "spectrum_scale", "spectrum_fraction", "tuner_fraction"});
+        {"db_min", "db_max", "spectrum_scale", "spectrum_fraction", "tuner_fraction",
+         "log_freq_min", "log_freq_max", "smooth_alpha", "max_hold_decay_db"});
     cfg.db_min            = d.value("db_min",            cfg.db_min);
     cfg.db_max            = d.value("db_max",            cfg.db_max);
     cfg.spectrum_scale    = d.value("spectrum_scale",    cfg.spectrum_scale);
     cfg.spectrum_fraction = d.value("spectrum_fraction", cfg.spectrum_fraction);
     cfg.tuner_fraction    = d.value("tuner_fraction",    cfg.tuner_fraction);
+    cfg.log_freq_min      = d.value("log_freq_min",      cfg.log_freq_min);
+    cfg.log_freq_max      = d.value("log_freq_max",      cfg.log_freq_max);
+    cfg.smooth_alpha      = d.value("smooth_alpha",      cfg.smooth_alpha);
+    cfg.max_hold_decay_db = d.value("max_hold_decay_db", cfg.max_hold_decay_db);
   }
   if (j.contains("waveform_overlay")) {
     const auto& w = j["waveform_overlay"];

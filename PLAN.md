@@ -17,6 +17,7 @@ This repo is a copy of an OpenGL 4.5 compute shader particle simulation template
 - **Phase 1 (partial)**: Complete ✓ — `fft_config.hpp/cpp`, `shaders/compute/` shaders, all FFT tests passing. Remaining: SSBO setup + compute dispatch in `main.cpp`.
 - **Phase 2**: Complete ✓ — `GpuPipeline` class, full compute chain + waterfall/spectrum rendering, dB normalization, configurable display range and spectrum headroom.
 - **Phase 3**: Complete ✓ — pitch detection, music theory, EMA smoother with frequency-proximity gate, tuner band widget, JSON app config.
+- **Phase 4**: Complete ✓ — 50% overlap, GPU magnitude smoothing, log-frequency display, spectrum axes overlay.
 
 ---
 
@@ -165,13 +166,25 @@ Display range and panel sizing are loaded from `ear_training.json` (written on f
 
 ---
 
-## Phase 4: Overlap, Smoothing, Log-Frequency Axis + Spectrum Axes
+## Phase 4: Overlap, Smoothing, Log-Frequency Axis + Spectrum Axes ✓
 
 ### Changes
-- **50% overlap**: CPU-side `frame_buf[FFT_N]`, shift by `hop_size = FFT_N/2` each frame.
-- **Exponential smoothing**: `smoothed[i] = mix(smoothed[i], magnitude[i], alpha)` (~0.3).
-- **Log-frequency display**: `log2(freq/f_min)/log2(f_max/f_min)` mapping in waterfall.frag and spectrum.vert. Piano notes become equally spaced.
-- **Spectrum axes + ticks**: Frequency (X) and dB (Y) axis lines + tick marks drawn via `ImGui::GetWindowDrawList()` overlaid on the spectrum GL viewport. No new library dependency — the GPU `GL_LINE_STRIP` rendering is preserved. Tick label positions computed from the same log-frequency mapping used in spectrum.vert so they stay aligned. Piano note labels (C2, C3, C4, A4, C5, etc.) on X; dB grid lines on Y.
+
+**50% overlap** (`src/main.cpp`): `frame_buf[fft_n]` sliding window advanced by `hop_size = fft_n/2` each time `accum_buf` fills. Ring buffer samples are consumed via `read()` into `accum_buf`; the overlap loop shifts `frame_buf` and dispatches one FFT per hop. Pitch detection only runs on dispatch frames; `display_pitch`/`smoothed_cents` hold their last committed value between hops.
+
+**Magnitude smoothing** (`shaders/compute/smooth_magnitude.comp`, `GpuPipeline`): New GPU-only `smooth_ssbo_` and `prog_smooth_magnitude_`. Each frame: `smooth_mag[i] = mix(smooth_mag[i], magnitude[i], alpha)`. Waterfall and spectrum render read `smooth_ssbo_`; pitch detection readback still reads raw `magnitude_ssbo_`. `smooth_alpha` configurable via `ear_training.json` (`display.smooth_alpha`, default 0.3).
+
+**Log-frequency display** (`shaders/render/spectrum.vert`, `shaders/render/waterfall.frag`): Both shaders receive three new uniforms — `f_min`, `log_freq_range`, `nyquist`. `spectrum.vert`: bin → Hz → `t = log2(freq/f_min)/log_range` → NDC x. `waterfall.frag`: screen V → `freq = pow(2, v * log_range) * f_min` → linear texture V. Bounds `log_freq_min` (default 27.5 Hz = A0) and `log_freq_max` (default 4186 Hz = C8) configurable in `ear_training.json`.
+
+**Spectrum axes overlay** (`src/ui/spectrum_axis_widget.hpp/.cpp`): `SpectrumAxisWidget` widget. Transparent ImGui window covers the spectrum viewport; uses `GetWindowDrawList()` to draw dB grid lines (every 20 dB) and piano-range vertical frequency tick labels (A0, C2 … C8). Tick screen-x uses the same `t = log2(f/f_min)/log_range * fb_w` formula as `spectrum.vert`, keeping labels pixel-aligned with the GL plot.
+
+**FrameData addition**: `spectrum_peak_x_norm` (float, [0,1]) — log-mapped x of the dominant peak, computed in `main.cpp` and used by `TunerWidget` for the spectrum triangle marker (replaces the now-misaligned linear `bin_normalized`).
+
+### Files modified
+`src/main.cpp`, `src/core/app_config.hpp/.cpp`, `src/core/gpu_pipeline.hpp/.cpp`, `src/ui/frame_data.hpp`, `src/ui/tuner_widget.cpp`, `shaders/render/spectrum.vert`, `shaders/render/waterfall.frag`, `CMakeLists.txt`
+
+### Files created
+`shaders/compute/smooth_magnitude.comp`, `src/ui/spectrum_axis_widget.hpp/.cpp`
 
 ---
 
