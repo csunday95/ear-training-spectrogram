@@ -12,25 +12,6 @@ namespace core {
 
 namespace {
 
-constexpr float    kDefaultDbMin           = -80.f;
-constexpr float    kDefaultDbMax           = 0.f;
-constexpr float    kDefaultSpectrumScale   = 0.9f;
-constexpr float    kDefaultSpectrumFraction = 0.40f;
-constexpr float    kDefaultTunerFraction   = 0.20f;
-constexpr float    kDefaultLogFreqMin      = 27.5f;    // A0 — lowest piano key
-constexpr float    kDefaultLogFreqMax      = 4186.0f;  // C8 — highest piano key
-constexpr float    kDefaultSmoothAlpha     = 0.3f;
-constexpr float    kDefaultMaxHoldDecayDb  = 0.4f;
-constexpr float    kDefaultWaveWidth       = 300.f;
-constexpr float    kDefaultWaveHeight      = 80.f;
-constexpr float    kDefaultWaveMargin      = 10.f;
-constexpr float    kDefaultMinDb           = -50.f;
-constexpr float    kDefaultMaxHwhmBins     = 8.f;
-constexpr uint32_t kDefaultMaxPeaks        = 8u;
-constexpr float    kDefaultEmaAlpha        = 0.3f;
-constexpr uint32_t kDefaultStabilityFrames = 4u;
-constexpr float    kDefaultGateCents       = 80.0f;
-
 // Warn about any key in `section` that is not in `known`.
 void warn_unknown_keys(const nlohmann::json&                    section,
                        std::string_view                          section_name,
@@ -50,35 +31,49 @@ void warn_unknown_keys(const nlohmann::json&                    section,
   }
 }
 
-// Known top-level section names.
+// Populate a Param<T> from a JSON section using the param's own key.
+// Falls back to the current value (i.e. the compiled-in default) if the key is absent.
+template<typename T>
+void load_param(const nlohmann::json& section, Param<T>& param) {
+  param.value = section.value(param.key, param.value);
+}
+
+// Known top-level section names — derived from kSection constants so they can't drift.
 constexpr std::array<std::string_view, 4> kTopLevelKeys = {
-    "display", "waveform_overlay", "pitch_detection", "tuner_smoother"};
+    DisplayConfig::kSection, WaveformConfig::kSection,
+    PitchConfig::kSection,   TunerConfig::kSection};
 
 void write_default_config(const std::string& path, const AppConfig& cfg) {
-  using json   = nlohmann::json;
+  using json       = nlohmann::json;
+  const auto& dc   = cfg.display;
+  const auto& wc   = cfg.waveform_overlay;
+  const auto& pd   = cfg.pitch_detection;
+  const auto& tc   = cfg.tuner_smoother;
   const json j = {
-      {"display",
-       {{"db_min", cfg.db_min},
-        {"db_max", cfg.db_max},
-        {"spectrum_scale", cfg.spectrum_scale},
-        {"spectrum_fraction", cfg.spectrum_fraction},
-        {"tuner_fraction", cfg.tuner_fraction},
-        {"log_freq_min", cfg.log_freq_min},
-        {"log_freq_max", cfg.log_freq_max},
-        {"smooth_alpha", cfg.smooth_alpha},
-        {"max_hold_decay_db", cfg.max_hold_decay_db}}},
-      {"waveform_overlay",
-       {{"width", cfg.wave_width},
-        {"height", cfg.wave_height},
-        {"margin", cfg.wave_margin}}},
-      {"pitch_detection",
-       {{"min_db", cfg.min_db},
-        {"max_hwhm_bins", cfg.max_hwhm_bins},
-        {"max_peaks", cfg.max_peaks}}},
-      {"tuner_smoother",
-       {{"ema_alpha", cfg.ema_alpha},
-        {"stability_frames", cfg.stability_frames},
-        {"gate_cents", cfg.gate_cents}}},
+      {DisplayConfig::kSection,
+       {{dc.db_min.key,            dc.db_min.value},
+        {dc.db_max.key,            dc.db_max.value},
+        {dc.spectrum_scale.key,    dc.spectrum_scale.value},
+        {dc.spectrum_fraction.key, dc.spectrum_fraction.value},
+        {dc.tuner_fraction.key,    dc.tuner_fraction.value},
+        {dc.log_freq_min.key,      dc.log_freq_min.value},
+        {dc.log_freq_max.key,      dc.log_freq_max.value},
+        {dc.smooth_alpha.key,      dc.smooth_alpha.value},
+        {dc.max_hold_decay_db.key, dc.max_hold_decay_db.value}}},
+      {WaveformConfig::kSection,
+       {{wc.width.key,  wc.width.value},
+        {wc.height.key, wc.height.value},
+        {wc.margin.key, wc.margin.value}}},
+      {PitchConfig::kSection,
+       {{pd.min_db.key,                  pd.min_db.value},
+        {pd.max_hwhm_bins.key,           pd.max_hwhm_bins.value},
+        {pd.max_peaks.key,               pd.max_peaks.value},
+        {pd.noise_estimation_frames.key, pd.noise_estimation_frames.value},
+        {pd.noise_floor_margin_db.key,   pd.noise_floor_margin_db.value}}},
+      {TunerConfig::kSection,
+       {{tc.ema_alpha.key,        tc.ema_alpha.value},
+        {tc.stability_frames.key, tc.stability_frames.value},
+        {tc.gate_cents.key,       tc.gate_cents.value}}},
   };
   std::ofstream out{path};
   if (out) {
@@ -92,26 +87,7 @@ void write_default_config(const std::string& path, const AppConfig& cfg) {
 }  // namespace
 
 AppConfig load_app_config(const std::string& path) {
-  AppConfig cfg{
-      .db_min            = kDefaultDbMin,
-      .db_max            = kDefaultDbMax,
-      .spectrum_scale    = kDefaultSpectrumScale,
-      .spectrum_fraction = kDefaultSpectrumFraction,
-      .tuner_fraction    = kDefaultTunerFraction,
-      .log_freq_min      = kDefaultLogFreqMin,
-      .log_freq_max      = kDefaultLogFreqMax,
-      .smooth_alpha      = kDefaultSmoothAlpha,
-      .max_hold_decay_db = kDefaultMaxHoldDecayDb,
-      .wave_width        = kDefaultWaveWidth,
-      .wave_height       = kDefaultWaveHeight,
-      .wave_margin       = kDefaultWaveMargin,
-      .min_db            = kDefaultMinDb,
-      .max_hwhm_bins     = kDefaultMaxHwhmBins,
-      .max_peaks         = kDefaultMaxPeaks,
-      .ema_alpha         = kDefaultEmaAlpha,
-      .stability_frames  = kDefaultStabilityFrames,
-      .gate_cents        = kDefaultGateCents,
-  };
+  AppConfig cfg{};  // all Param<T> member defaults kick in
 
   std::ifstream file{path};
   if (!file.is_open()) {
@@ -143,41 +119,51 @@ AppConfig load_app_config(const std::string& path) {
     }
   }
 
-  if (j.contains("display")) {
-    const auto& d = j["display"];
-    warn_unknown_keys(d, "display",
-        {"db_min", "db_max", "spectrum_scale", "spectrum_fraction", "tuner_fraction",
-         "log_freq_min", "log_freq_max", "smooth_alpha", "max_hold_decay_db"});
-    cfg.db_min            = d.value("db_min",            cfg.db_min);
-    cfg.db_max            = d.value("db_max",            cfg.db_max);
-    cfg.spectrum_scale    = d.value("spectrum_scale",    cfg.spectrum_scale);
-    cfg.spectrum_fraction = d.value("spectrum_fraction", cfg.spectrum_fraction);
-    cfg.tuner_fraction    = d.value("tuner_fraction",    cfg.tuner_fraction);
-    cfg.log_freq_min      = d.value("log_freq_min",      cfg.log_freq_min);
-    cfg.log_freq_max      = d.value("log_freq_max",      cfg.log_freq_max);
-    cfg.smooth_alpha      = d.value("smooth_alpha",      cfg.smooth_alpha);
-    cfg.max_hold_decay_db = d.value("max_hold_decay_db", cfg.max_hold_decay_db);
+  if (j.contains(DisplayConfig::kSection)) {
+    const auto& d = j[DisplayConfig::kSection];
+    auto& dc      = cfg.display;
+    warn_unknown_keys(d, DisplayConfig::kSection,
+        {dc.db_min.key, dc.db_max.key, dc.spectrum_scale.key, dc.spectrum_fraction.key,
+         dc.tuner_fraction.key, dc.log_freq_min.key, dc.log_freq_max.key,
+         dc.smooth_alpha.key, dc.max_hold_decay_db.key});
+    load_param(d, dc.db_min);
+    load_param(d, dc.db_max);
+    load_param(d, dc.spectrum_scale);
+    load_param(d, dc.spectrum_fraction);
+    load_param(d, dc.tuner_fraction);
+    load_param(d, dc.log_freq_min);
+    load_param(d, dc.log_freq_max);
+    load_param(d, dc.smooth_alpha);
+    load_param(d, dc.max_hold_decay_db);
   }
-  if (j.contains("waveform_overlay")) {
-    const auto& w = j["waveform_overlay"];
-    warn_unknown_keys(w, "waveform_overlay", {"width", "height", "margin"});
-    cfg.wave_width  = w.value("width",  cfg.wave_width);
-    cfg.wave_height = w.value("height", cfg.wave_height);
-    cfg.wave_margin = w.value("margin", cfg.wave_margin);
+  if (j.contains(WaveformConfig::kSection)) {
+    const auto& w = j[WaveformConfig::kSection];
+    auto& wc      = cfg.waveform_overlay;
+    warn_unknown_keys(w, WaveformConfig::kSection, {wc.width.key, wc.height.key, wc.margin.key});
+    load_param(w, wc.width);
+    load_param(w, wc.height);
+    load_param(w, wc.margin);
   }
-  if (j.contains("pitch_detection")) {
-    const auto& p = j["pitch_detection"];
-    warn_unknown_keys(p, "pitch_detection", {"min_db", "max_hwhm_bins", "max_peaks"});
-    cfg.min_db        = p.value("min_db",        cfg.min_db);
-    cfg.max_hwhm_bins = p.value("max_hwhm_bins", cfg.max_hwhm_bins);
-    cfg.max_peaks     = p.value("max_peaks",     cfg.max_peaks);
+  if (j.contains(PitchConfig::kSection)) {
+    const auto& p = j[PitchConfig::kSection];
+    auto& pd      = cfg.pitch_detection;
+    warn_unknown_keys(p, PitchConfig::kSection,
+        {pd.min_db.key, pd.max_hwhm_bins.key, pd.max_peaks.key,
+         pd.noise_estimation_frames.key, pd.noise_floor_margin_db.key});
+    load_param(p, pd.min_db);
+    load_param(p, pd.max_hwhm_bins);
+    load_param(p, pd.max_peaks);
+    load_param(p, pd.noise_estimation_frames);
+    load_param(p, pd.noise_floor_margin_db);
   }
-  if (j.contains("tuner_smoother")) {
-    const auto& t = j["tuner_smoother"];
-    warn_unknown_keys(t, "tuner_smoother", {"ema_alpha", "stability_frames", "gate_cents"});
-    cfg.ema_alpha        = t.value("ema_alpha",        cfg.ema_alpha);
-    cfg.stability_frames = t.value("stability_frames", cfg.stability_frames);
-    cfg.gate_cents       = t.value("gate_cents",       cfg.gate_cents);
+  if (j.contains(TunerConfig::kSection)) {
+    const auto& t = j[TunerConfig::kSection];
+    auto& tc      = cfg.tuner_smoother;
+    warn_unknown_keys(t, TunerConfig::kSection,
+        {tc.ema_alpha.key, tc.stability_frames.key, tc.gate_cents.key});
+    load_param(t, tc.ema_alpha);
+    load_param(t, tc.stability_frames);
+    load_param(t, tc.gate_cents);
   }
 
   return cfg;

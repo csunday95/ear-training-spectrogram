@@ -15,33 +15,32 @@ set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
     glfw
-    GIT_REPOSITORY https://github.com/glfw/glfw.git
-    GIT_TAG        3.4
+    URL      https://github.com/glfw/glfw/archive/refs/tags/3.4.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(glfw)
 
 # GLM via FetchContent
 FetchContent_Declare(
     glm
-    GIT_REPOSITORY https://github.com/g-truc/glm.git
-    GIT_TAG        1.0.1
-    GIT_SHALLOW    TRUE
+    URL      https://github.com/g-truc/glm/archive/refs/tags/1.0.1.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(glm)
 
 # CLI11 via FetchContent
 FetchContent_Declare(
     CLI11
-    GIT_REPOSITORY https://github.com/CLIUtils/CLI11
-    GIT_TAG        v2.4.2
+    URL      https://github.com/CLIUtils/CLI11/archive/refs/tags/v2.4.2.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(CLI11)
 
 # Dear ImGui via FetchContent
 FetchContent_Declare(
     imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.91.5
+    URL      https://github.com/ocornut/imgui/archive/refs/tags/v1.91.5.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(imgui)
 
@@ -66,9 +65,8 @@ target_include_directories(glad SYSTEM PUBLIC deps/glad/include)
 # nlohmann/json (header-only JSON for config file loading)
 FetchContent_Declare(
     nlohmann_json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG        v3.11.3
-    GIT_SHALLOW    TRUE
+    URL      https://github.com/nlohmann/json/archive/refs/tags/v3.11.3.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
 set(JSON_Install    OFF CACHE BOOL "" FORCE)
@@ -77,9 +75,8 @@ FetchContent_MakeAvailable(nlohmann_json)
 # miniaudio (single-header, header-only interface target)
 FetchContent_Declare(
     miniaudio
-    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
-    GIT_TAG        0.11.21
-    GIT_SHALLOW    TRUE
+    URL      https://github.com/mackron/miniaudio/archive/refs/tags/0.11.21.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(miniaudio)
 add_library(miniaudio INTERFACE)
@@ -109,6 +106,7 @@ add_executable(ear_training
     src/core/app_config.cpp
     src/audio/audio_capture.cpp
     src/audio/fft_config.cpp
+    src/audio/noise_floor.cpp
     src/audio/pitch_detect.cpp
     src/audio/miniaudio_impl.cpp
     src/ui/imgui_renderer.cpp
@@ -151,8 +149,8 @@ endif()
 
 FetchContent_Declare(
     Catch2
-    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG        v3.8.0
+    URL      https://github.com/catchorg/Catch2/archive/refs/tags/v3.8.0.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 FetchContent_MakeAvailable(Catch2)
 

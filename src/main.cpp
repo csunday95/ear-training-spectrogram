@@ -1,5 +1,6 @@
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
+#include <imgui.h>
 
 #include <CLI/CLI.hpp>
 
@@ -9,6 +10,7 @@
 #include "gl_init.hpp"
 #include "gpu_pipeline.hpp"
 #include "log.hpp"
+#include "noise_floor.hpp"
 #include "pitch_detect.hpp"
 #include "pitch_smoother.hpp"
 #include "ui/imgui_renderer.hpp"
@@ -87,10 +89,14 @@ int main(int argc, char** argv) {
   // --- GPU pipeline ---
   int fb_w = 0, fb_h = 0;
   glfwGetFramebufferSize(window, &fb_w, &fb_h);
-  core::GpuPipeline pipeline{*fft_cfg, fb_w, cfg.db_min, cfg.db_max,
-                             cfg.spectrum_scale, cfg.spectrum_fraction, cfg.tuner_fraction,
-                             cfg.log_freq_min, cfg.log_freq_max, cfg.smooth_alpha,
-                             cfg.max_hold_decay_db, kSampleRate};
+  const auto& dc = cfg.display;
+  core::GpuPipeline pipeline{*fft_cfg, fb_w,
+                             dc.db_min.value, dc.db_max.value,
+                             dc.spectrum_scale.value, dc.spectrum_fraction.value,
+                             dc.tuner_fraction.value,
+                             dc.log_freq_min.value, dc.log_freq_max.value,
+                             dc.smooth_alpha.value, dc.max_hold_decay_db.value,
+                             kSampleRate};
   if (!pipeline.ok()) {
     LOG_ERROR("GPU pipeline failed to initialise — check shader compile errors above");
     return 1;
@@ -98,11 +104,12 @@ int main(int argc, char** argv) {
 
   // --- UI ---
   ui::ImGuiRenderer  imgui{window, "#version 450"};
-  ui::WaveformWidget waveform_widget{cfg.wave_width, cfg.wave_height, cfg.wave_margin};
-  ui::TunerWidget    tuner_widget{cfg.spectrum_fraction, cfg.tuner_fraction};
-  ui::SpectrumAxisWidget axis_widget{cfg.log_freq_min, cfg.log_freq_max,
-                                     cfg.db_min, cfg.db_max,
-                                     cfg.spectrum_scale, cfg.spectrum_fraction};
+  const auto& wc = cfg.waveform_overlay;
+  ui::WaveformWidget waveform_widget{wc.width.value, wc.height.value, wc.margin.value};
+  ui::TunerWidget    tuner_widget{dc.spectrum_fraction.value, dc.tuner_fraction.value};
+  ui::SpectrumAxisWidget axis_widget{dc.log_freq_min.value, dc.log_freq_max.value,
+                                     dc.db_min.value, dc.db_max.value,
+                                     dc.spectrum_scale.value, dc.spectrum_fraction.value};
   audio::PitchSmoother smoother;
 
   // --- Audio ---
@@ -116,15 +123,20 @@ int main(int argc, char** argv) {
   const uint32_t hop_size = fft_n / 2u;
   const uint32_t fft_bins = fft_n / 2u + 1u;
 
+  audio::NoiseFloor noise_floor{
+      fft_bins,
+      cfg.pitch_detection.noise_estimation_frames.value};
+
   // Sliding FFT window: always fft_n samples, advanced by hop_size each dispatch.
   std::vector<float> frame_buf(fft_n, 0.0f);
   // Intermediate accumulator: ring buffer samples not yet consumed into frame_buf.
   std::vector<float> accum_buf;
   accum_buf.reserve(fft_n);
+  // Scratch buffer for noise-subtracted magnitude (pitch detection only; display unaffected).
+  std::vector<float> denoised_mag(fft_bins, 0.0f);
 
   // Precompute log range for the peak x-norm computation (matches spectrum.vert).
-  const float log_freq_range =
-      std::log2(cfg.log_freq_max / cfg.log_freq_min);
+  const float log_freq_range = std::log2(dc.log_freq_max.value / dc.log_freq_min.value);
 
   // Pitch and display state — persists across frames so the tuner holds its last
   // committed value during frames when no new hop is dispatched.
@@ -167,16 +179,32 @@ int main(int argc, char** argv) {
 
     // --- Pitch detection (only when new FFT data is available) ---
     if (dispatched) {
-      const std::span<const float> mag{pipeline.sync_get_mag_data(), fft_bins};
+      const std::span<const float> raw_mag{pipeline.sync_get_mag_data(), fft_bins};
+
+      // Feed the noise estimator; once ready, subtract the estimated floor.
+      noise_floor.update(raw_mag);
+      std::span<const float> mag = raw_mag;
+      if (noise_floor.ready()) {
+        noise_floor.subtract(raw_mag, denoised_mag,
+                             cfg.pitch_detection.noise_floor_margin_db.value,
+                             cfg.pitch_detection.min_db.value);
+        mag = denoised_mag;
+      }
+
       auto detection = audio::detect_peaks(
-          mag, fft_n, kSampleRate, cfg.min_db, cfg.max_hwhm_bins, cfg.max_peaks);
+          mag, fft_n, kSampleRate,
+          cfg.pitch_detection.min_db.value,
+          cfg.pitch_detection.max_hwhm_bins.value,
+          cfg.pitch_detection.max_peaks.value);
 
       const std::optional<audio::DetectionResult> raw_pitch =
           detection.peaks.empty() ? std::nullopt
                                    : std::optional<audio::DetectionResult>{detection};
 
+      const auto& tc             = cfg.tuner_smoother;
       const std::optional<float> cents =
-          smoother.update(raw_pitch, cfg.ema_alpha, cfg.stability_frames, cfg.gate_cents);
+          smoother.update(raw_pitch, tc.ema_alpha.value, tc.stability_frames.value,
+                          tc.gate_cents.value);
 
       if (cents.has_value()) {
         display_pitch  = std::move(detection);
@@ -186,7 +214,7 @@ int main(int argc, char** argv) {
         if (!display_pitch->peaks.empty()) {
           const float f = display_pitch->peaks[0].frequency;
           spectrum_peak_x =
-              std::clamp(std::log2(f / cfg.log_freq_min) / log_freq_range, 0.0f, 1.0f);
+              std::clamp(std::log2(f / dc.log_freq_min.value) / log_freq_range, 0.0f, 1.0f);
         }
       } else {
         display_pitch = std::nullopt;
@@ -202,6 +230,13 @@ int main(int argc, char** argv) {
 
     // --- UI overlay ---
     imgui.begin_frame();
+
+    // 'R' — restart noise floor estimation from scratch.
+    if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+      noise_floor.reset();
+      LOG_INFO("Noise floor reset — re-estimating over {} frames",
+               cfg.pitch_detection.noise_estimation_frames.value);
+    }
 
     ui::FrameData frame{
         .waveform              = frame_buf,
