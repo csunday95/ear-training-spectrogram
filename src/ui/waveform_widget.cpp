@@ -23,8 +23,8 @@ void WaveformWidget::draw(const FrameData& frame) {
 
   // Anchor to the bottom-right corner, clear of the spectrum viewport below.
   ImGui::SetNextWindowPos(
-      {static_cast<float>(frame.framebuffer_width) - width_ - margin_,
-       static_cast<float>(frame.framebuffer_height) - height_ - margin_},
+      {static_cast<float>(frame.window_width) - width_ - margin_,
+       static_cast<float>(frame.window_height) - height_ - margin_},
       ImGuiCond_Always);
   ImGui::SetNextWindowSize({width_, height_}, ImGuiCond_Always);
 

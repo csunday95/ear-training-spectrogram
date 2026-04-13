@@ -6,7 +6,8 @@
 
 - **`frame_data.hpp`** — `FrameData` passed by `const&` to all `draw()` calls:
   - `waveform` — span of the current `frame_buf` samples
-  - `framebuffer_width / framebuffer_height` — current FB dimensions
+  - `framebuffer_width / framebuffer_height` — raw GL framebuffer pixel dimensions (use for GL viewport math only)
+  - `window_width / window_height` — logical screen dimensions from `glfwGetWindowSize` (use for ImGui positioning; differs from framebuffer dims on HiDPI/scaled displays)
   - `pitch` — `optional<DetectionResult>` (nullopt when silent or gate not committed)
   - `smoothed_cents` — valid only when `pitch` has a value
   - `spectrum_peak_x_norm` — log-frequency-mapped x ∈ [0,1] of the dominant peak (used by tuner triangle)

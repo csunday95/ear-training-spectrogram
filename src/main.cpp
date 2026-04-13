@@ -261,10 +261,15 @@ int main(int argc, char** argv) {
                cfg.pitch_detection.noise_estimation_frames.value);
     }
 
+    int win_w = 0, win_h = 0;
+    glfwGetWindowSize(window, &win_w, &win_h);
+
     ui::FrameData frame{
         .waveform              = frame_buf,
         .framebuffer_width     = fb_w,
         .framebuffer_height    = fb_h,
+        .window_width          = win_w,
+        .window_height         = win_h,
         .pitch                 = display_pitch,
         .smoothed_cents        = smoothed_cents,
         .spectrum_peak_x_norm  = spectrum_peak_x,

@@ -64,8 +64,8 @@ TunerWidget::TunerWidget(float spectrum_fraction, float tuner_fraction)
     , tuner_fraction_{tuner_fraction} {}
 
 void TunerWidget::draw(const FrameData& frame) {
-  const float fb_w = static_cast<float>(frame.framebuffer_width);
-  const float fb_h = static_cast<float>(frame.framebuffer_height);
+  const float fb_w = static_cast<float>(frame.window_width);
+  const float fb_h = static_cast<float>(frame.window_height);
 
   // The tuner band sits between the waterfall (top) and spectrum (bottom).
   // In ImGui screen coordinates (y=0 at top):

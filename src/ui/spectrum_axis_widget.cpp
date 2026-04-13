@@ -52,8 +52,8 @@ SpectrumAxisWidget::SpectrumAxisWidget(float f_min, float f_max, float db_min, f
     , spectrum_fraction_{spectrum_fraction} {}
 
 void SpectrumAxisWidget::draw(const FrameData& frame) {
-  const float fb_w        = static_cast<float>(frame.framebuffer_width);
-  const float fb_h        = static_cast<float>(frame.framebuffer_height);
+  const float fb_w        = static_cast<float>(frame.window_width);
+  const float fb_h        = static_cast<float>(frame.window_height);
   const float spectrum_h  = fb_h * spectrum_fraction_;
   const float panel_top_y = fb_h - spectrum_h;  // ImGui y of spectrum panel top
 

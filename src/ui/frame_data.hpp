@@ -14,8 +14,14 @@ namespace ui {
  */
 struct FrameData {
   std::span<const float> waveform;
+  // Raw framebuffer pixel dimensions — for GL viewport / render calculations.
   int framebuffer_width;
   int framebuffer_height;
+  // Logical window dimensions in screen coordinates (from glfwGetWindowSize).
+  // Use these for ImGui positioning; on HiDPI/scaled displays these differ from
+  // the framebuffer dimensions.
+  int window_width;
+  int window_height;
 
   // Nullopt when no stable pitch is detected (either no peaks above threshold,
   // or the note-stability gate has not yet committed).
