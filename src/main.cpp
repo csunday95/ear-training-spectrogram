@@ -60,10 +60,13 @@ int main(int argc, char** argv) {
   const auto cfg  = core::load_app_config(args.config_path);
 
   // --- Window + GL ---
-  auto* window = init_gl_window(args.width, args.height, "ear_training");
-  if (!window) {
+  // GlfwGuard is declared first so its destructor (glfwTerminate) runs last,
+  // after pipeline and imgui have already been destroyed.
+  GlfwGuard glfw{init_gl_window(args.width, args.height, "ear_training")};
+  if (!glfw.window) {
     return 1;
   }
+  GLFWwindow* const window = glfw.window;
 
   // --- FFT config ---
   GLint max_shared_mem = 0;
@@ -183,8 +186,6 @@ int main(int argc, char** argv) {
 
   // --- Cleanup ---
   capture.stop();
-  // All other resources cleaned up by RAII destructors (pipeline, imgui).
-
-  glfwTerminate();
+  // All other resources cleaned up by RAII destructors (pipeline, imgui, glfw).
   return 0;
 }

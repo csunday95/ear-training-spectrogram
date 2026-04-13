@@ -11,3 +11,12 @@ GLFWwindow* init_gl_window(int width, int height, const char* title, bool visibl
 // Same GL 4.5 core debug context, no swap interval.
 // Returns nullptr if GLFW/GL initialization fails (e.g. no display server).
 GLFWwindow* init_gl_context_headless();
+
+// RAII guard that calls glfwTerminate() on destruction.
+// Declare it before any GL/ImGui objects so it is destroyed last (C++ destructs
+// in reverse declaration order), ensuring glfwTerminate() runs after all GL
+// resources have been freed.
+struct GlfwGuard {
+  GLFWwindow* window;
+  ~GlfwGuard();
+};

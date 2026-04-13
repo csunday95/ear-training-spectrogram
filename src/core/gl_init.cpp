@@ -69,6 +69,8 @@ GLFWwindow* init_gl_window(int width, int height, const char* title, bool visibl
   return window;
 }
 
+GlfwGuard::~GlfwGuard() { glfwTerminate(); }
+
 GLFWwindow* init_gl_context_headless() {
   glfwSetErrorCallback(error_callback);
   if (!glfwInit()) {
