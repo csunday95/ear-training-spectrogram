@@ -17,3 +17,7 @@
 - **`pitch_smoother.hpp`** — Header-only `PitchSmoother`. `update(raw, ema_alpha, stability_frames, gate_cents) → optional<float>` (smoothed cents). Gate: `stability_frames` consecutive frames within `gate_cents` cents of candidate before locking. Resets on silence or jump ≥ `gate_cents`.
 
 - **`noise_floor.hpp/cpp`** — `NoiseFloor(n_bins, estimation_frames)`. Accumulates first N frames in linear power (`10^(dB/10)`), then provides `subtract(raw, out, margin_db, db_floor)` for spectral subtraction before peak detection. `ready()` → true once estimation complete. `reset()` restarts estimation (bound to 'R' key in `main.cpp`). Display pipeline is unaffected — subtraction is CPU-side only.
+
+- **`yin.hpp/cpp`** — `Yin(sample_rate, window_size, threshold)`. CPU YIN pitch detector (de Cheveigné & Kawahara 2002). `estimate(samples) → YinResult{frequency, aperiodicity}`. Searches 80–1200 Hz (full singing voice). Steps: difference function → CMNDF → first local minimum below threshold → parabolic interpolation. Returns `frequency=0` on silence or no credible pitch. Input must have ≥ `window_size + sr/80` samples.
+
+- **`source_classifier.hpp`** — Header-only `SourceClassifier(onset_threshold, piano_hold_hops, silence_rms)`. Amplitude-envelope state machine. `update(samples) → AudioSource` (Unknown / Piano / Voice). Tracks short-time RMS EMA; a normalised RMS rate-of-change above `onset_threshold` triggers Piano for `piano_hold_hops` hops. All thresholds require iterative tuning with real audio.

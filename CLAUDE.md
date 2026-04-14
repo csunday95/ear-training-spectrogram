@@ -45,7 +45,10 @@ AudioCapture::ring() → accum_buf (drained each render frame)
   → GpuPipeline::dispatch()          GPU compute chain
   → GpuPipeline::sync_get_mag_data() fence + CPU readback (raw magnitude)
   → NoiseFloor::update/subtract()    spectral denoising (once floor is ready)
-  → detect_peaks()                 → DetectionResult
+  → detect_peaks()                 → DetectionResult          (FFT path)
+  → Yin::estimate()                → YinResult                (time-domain path)
+  → SourceClassifier::update()     → AudioSource (Piano/Voice/Unknown)
+  → select active pitch (Voice→YIN, else→FFT peaks)
   → PitchSmoother::update()        → optional<float> smoothed_cents
   → FrameData{...}                 → widget draw calls
 ```

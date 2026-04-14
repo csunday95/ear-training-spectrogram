@@ -13,6 +13,8 @@
 #include "noise_floor.hpp"
 #include "pitch_detect.hpp"
 #include "pitch_smoother.hpp"
+#include "source_classifier.hpp"
+#include "yin.hpp"
 #include "ui/imgui_renderer.hpp"
 #include "ui/spectrum_axis_widget.hpp"
 #include "ui/tuner_widget.hpp"
@@ -110,7 +112,11 @@ int main(int argc, char** argv) {
   ui::SpectrumAxisWidget axis_widget{dc.log_freq_min.value, dc.log_freq_max.value,
                                      dc.db_min.value, dc.db_max.value,
                                      dc.spectrum_scale.value, dc.spectrum_fraction.value};
-  audio::PitchSmoother smoother;
+  audio::PitchSmoother    smoother;
+  const auto& yc = cfg.yin;
+  audio::Yin              yin{kSampleRate, yc.window_size.value, yc.threshold.value};
+  audio::SourceClassifier source_classifier{
+      yc.onset_threshold.value, yc.piano_hold_hops.value, yc.silence_rms.value};
 
   // --- Audio ---
   audio::AudioCapture capture;
@@ -197,9 +203,28 @@ int main(int argc, char** argv) {
           cfg.pitch_detection.max_hwhm_bins.value,
           cfg.pitch_detection.max_peaks.value);
 
-      const std::optional<audio::DetectionResult> raw_pitch =
-          detection.peaks.empty() ? std::nullopt
-                                   : std::optional<audio::DetectionResult>{detection};
+      // YIN operates on the newest hop (second half of frame_buf).
+      const audio::YinResult yin_result = yin.estimate(frame_buf);
+      const audio::AudioSource source   = source_classifier.update(
+          std::span<const float>{frame_buf.data() + hop_size, hop_size});
+
+      // Select the pitch source based on the amplitude-envelope classification.
+      // Voice → prefer YIN's fundamental; Piano/Unknown → use FFT peak detection.
+      std::optional<audio::DetectionResult> raw_pitch;
+      float active_freq = 0.0f;
+      if (source == audio::AudioSource::Voice && yin_result.frequency > 0.0f) {
+        active_freq = yin_result.frequency;
+        raw_pitch   = audio::DetectionResult{{
+            audio::DetectedPeak{
+                .frequency      = yin_result.frequency,
+                .magnitude_db   = 0.0f,
+                .hwhm_hz        = 0.0f,
+                .bin_normalized = 0.0f,
+            }}};
+      } else if (!detection.peaks.empty()) {
+        active_freq = detection.peaks[0].frequency;
+        raw_pitch   = std::move(detection);
+      }
 
       const auto& tc             = cfg.tuner_smoother;
       const std::optional<float> cents =
@@ -207,15 +232,13 @@ int main(int argc, char** argv) {
                           tc.gate_cents.value);
 
       if (cents.has_value()) {
-        display_pitch  = std::move(detection);
+        display_pitch  = std::move(raw_pitch);
         smoothed_cents = *cents;
 
-        // Map the dominant peak frequency to a log-space x-norm [0, 1].
-        if (!display_pitch->peaks.empty()) {
-          const float f = display_pitch->peaks[0].frequency;
-          spectrum_peak_x =
-              std::clamp(std::log2(f / dc.log_freq_min.value) / log_freq_range, 0.0f, 1.0f);
-        }
+        // Map the active frequency to a log-space x-norm [0, 1].
+        spectrum_peak_x =
+            std::clamp(std::log2(active_freq / dc.log_freq_min.value) / log_freq_range,
+                       0.0f, 1.0f);
       } else {
         display_pitch = std::nullopt;
       }

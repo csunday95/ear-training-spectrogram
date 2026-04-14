@@ -43,11 +43,21 @@ struct TunerConfig {
   Param<float>    gate_cents       {"gate_cents",        80.0f}; // frequency jump threshold (cents) that resets the gate
 };
 
+struct YinConfig {
+  static constexpr const char* kSection = "yin";
+  Param<uint32_t> window_size       {"window_size",        1024u};
+  Param<float>    threshold         {"threshold",           0.15f};
+  Param<float>    onset_threshold   {"onset_threshold",     0.50f};  // normalised RMS rate-of-change
+  Param<uint32_t> piano_hold_hops   {"piano_hold_hops",       8u};  // hops to hold Piano after onset
+  Param<float>    silence_rms       {"silence_rms",          0.01f}; // RMS below this = Unknown
+};
+
 struct AppConfig {
   DisplayConfig  display;
   WaveformConfig waveform_overlay;
   PitchConfig    pitch_detection;
   TunerConfig    tuner_smoother;
+  YinConfig      yin;
 };
 
 // Load AppConfig from a JSON file at path.

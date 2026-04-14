@@ -18,6 +18,7 @@
   | `WaveformConfig` | `"waveform_overlay"` | width, height, margin |
   | `PitchConfig` | `"pitch_detection"` | min_db, max_hwhm_bins, max_peaks, noise_estimation_frames, noise_floor_margin_db |
   | `TunerConfig` | `"tuner_smoother"` | ema_alpha, stability_frames, gate_cents |
+  | `YinConfig` | `"yin"` | window_size, threshold, onset_threshold, piano_hold_hops, silence_rms |
 
   `load_app_config(path)` — reads `ear_training.json`; writes defaults on first run. Uses `load_param(section, param)` helper (anonymous namespace in .cpp). `AppConfig cfg{}` value-initialises all Param defaults. Access pattern: `cfg.display.db_min.value`, `cfg.pitch_detection.min_db.key`, etc.
 

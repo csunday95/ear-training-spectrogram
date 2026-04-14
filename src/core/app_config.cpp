@@ -39,9 +39,10 @@ void load_param(const nlohmann::json& section, Param<T>& param) {
 }
 
 // Known top-level section names — derived from kSection constants so they can't drift.
-constexpr std::array<std::string_view, 4> kTopLevelKeys = {
+constexpr std::array<std::string_view, 5> kTopLevelKeys = {
     DisplayConfig::kSection, WaveformConfig::kSection,
-    PitchConfig::kSection,   TunerConfig::kSection};
+    PitchConfig::kSection,   TunerConfig::kSection,
+    YinConfig::kSection};
 
 void write_default_config(const std::string& path, const AppConfig& cfg) {
   using json       = nlohmann::json;
@@ -49,6 +50,7 @@ void write_default_config(const std::string& path, const AppConfig& cfg) {
   const auto& wc   = cfg.waveform_overlay;
   const auto& pd   = cfg.pitch_detection;
   const auto& tc   = cfg.tuner_smoother;
+  const auto& yc   = cfg.yin;
   const json j = {
       {DisplayConfig::kSection,
        {{dc.db_min.key,            dc.db_min.value},
@@ -74,6 +76,12 @@ void write_default_config(const std::string& path, const AppConfig& cfg) {
        {{tc.ema_alpha.key,        tc.ema_alpha.value},
         {tc.stability_frames.key, tc.stability_frames.value},
         {tc.gate_cents.key,       tc.gate_cents.value}}},
+      {YinConfig::kSection,
+       {{yc.window_size.key,     yc.window_size.value},
+        {yc.threshold.key,       yc.threshold.value},
+        {yc.onset_threshold.key, yc.onset_threshold.value},
+        {yc.piano_hold_hops.key, yc.piano_hold_hops.value},
+        {yc.silence_rms.key,     yc.silence_rms.value}}},
   };
   std::ofstream out{path};
   if (out) {
@@ -164,6 +172,18 @@ AppConfig load_app_config(const std::string& path) {
     load_param(t, tc.ema_alpha);
     load_param(t, tc.stability_frames);
     load_param(t, tc.gate_cents);
+  }
+  if (j.contains(YinConfig::kSection)) {
+    const auto& y = j[YinConfig::kSection];
+    auto& yc      = cfg.yin;
+    warn_unknown_keys(y, YinConfig::kSection,
+        {yc.window_size.key, yc.threshold.key, yc.onset_threshold.key,
+         yc.piano_hold_hops.key, yc.silence_rms.key});
+    load_param(y, yc.window_size);
+    load_param(y, yc.threshold);
+    load_param(y, yc.onset_threshold);
+    load_param(y, yc.piano_hold_hops);
+    load_param(y, yc.silence_rms);
   }
 
   return cfg;

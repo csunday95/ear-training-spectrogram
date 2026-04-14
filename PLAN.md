@@ -18,6 +18,7 @@ This repo is a copy of an OpenGL 4.5 compute shader particle simulation template
 - **Phase 2**: Complete ✓ — `GpuPipeline` class, full compute chain + waterfall/spectrum rendering, dB normalization, configurable display range and spectrum headroom.
 - **Phase 3**: Complete ✓ — pitch detection, music theory, EMA smoother with frequency-proximity gate, tuner band widget, JSON app config.
 - **Phase 4**: Complete ✓ — 50% overlap, GPU magnitude smoothing, log-frequency display, spectrum axes overlay.
+- **Phase 5**: Complete ✓ — YIN voice pitch detector, SourceClassifier amplitude-envelope heuristic, integrated with PitchSmoother.
 
 ---
 
@@ -188,14 +189,15 @@ Display range and panel sizing are loaded from `ear_training.json` (written on f
 
 ---
 
-## Phase 5: Voice Pitch via YIN + Source Discrimination
+## Phase 5: Voice Pitch via YIN + Source Discrimination ✓
 
-### Create
-- `src/audio/yin.hpp/.cpp` — CPU YIN pitch detector on time-domain data. Window ~1200 samples for 80–1000 Hz range. Difference function → CMNDF → threshold (0.15) → parabolic interpolation.
-- `tests/test_yin.cpp` — Synthetic sine/sawtooth → correct pitch.
+### Created
+- `src/audio/yin.hpp/.cpp` — `Yin(sample_rate, window_size, threshold)`. CPU YIN pitch detector. Window 1024 samples, 80–1200 Hz range. Difference function → CMNDF → threshold (0.15) → parabolic interpolation. Silence guard on input energy.
+- `src/audio/source_classifier.hpp` — Header-only `SourceClassifier`. Amplitude-envelope state machine: normalised RMS rate-of-change above `onset_threshold` → Piano for `piano_hold_hops` hops; sustained above silence threshold → Voice.
+- `tests/test_yin.cpp` — 6 tests: sine at A4/C3/C6, sawtooth at E4, silence, and buffer-too-small.
 
-### Voice vs. Piano Heuristic
-Amplitude envelope state machine tracking RMS over ~200ms. Sharp onset → piano; steady amplitude → voice. Expected to need significant iterative tuning with real audio.
+### Integration (`src/main.cpp`)
+Per hop: YIN runs on `frame_buf`; `SourceClassifier` runs on the newest hop slice. Voice + valid YIN → synthetic `DetectionResult` with YIN frequency; Piano/Unknown → FFT `detect_peaks` result. Active frequency fed into `PitchSmoother` and used for log-space `spectrum_peak_x` calculation. Source classifier thresholds configurable via `"yin"` section of `ear_training.json`.
 
 ---
 
@@ -220,7 +222,8 @@ src/
     music_theory.hpp        — freq_to_note(), NoteInfo
     pitch_detect.hpp/.cpp   — FFT peak picking, parabolic interp, HWHM filter
     pitch_smoother.hpp      — EMA + frequency-proximity stability gate
-    yin.hpp/.cpp            — (Phase 5)
+    yin.hpp/.cpp            — YIN pitch detector (80–1200 Hz, voice)
+    source_classifier.hpp   — amplitude-envelope Piano/Voice/Unknown heuristic
     interval.hpp/.cpp       — (Phase 6)
   ui/
     frame_data.hpp          — per-frame state: waveform, fb dims, pitch, smoothed_cents
@@ -238,5 +241,5 @@ tests/
   gl_test_fixture.hpp       — headless GL fixture + REQUIRE_GL() macro
   test_ring_buffer.cpp, test_shader_loading.cpp, test_fft.cpp
   test_music_theory.cpp, test_pitch_detect.cpp
-  test_yin.cpp              — (Phase 5)
+  test_yin.cpp              — YIN: sine/sawtooth at known pitches, silence, buffer-too-small
 ```

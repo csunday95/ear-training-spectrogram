@@ -108,6 +108,7 @@ add_executable(ear_training
     src/audio/fft_config.cpp
     src/audio/noise_floor.cpp
     src/audio/pitch_detect.cpp
+    src/audio/yin.cpp
     src/audio/miniaudio_impl.cpp
     src/ui/imgui_renderer.cpp
     src/ui/waveform_widget.cpp
@@ -160,10 +161,12 @@ add_executable(app_tests
     tests/test_fft.cpp
     tests/test_music_theory.cpp
     tests/test_pitch_detect.cpp
+    tests/test_yin.cpp
     src/core/shader.cpp
     src/core/gl_init.cpp
     src/audio/fft_config.cpp
     src/audio/pitch_detect.cpp
+    src/audio/yin.cpp
 )
 target_include_directories(app_tests PRIVATE src/core src/audio)
 target_link_libraries(app_tests PRIVATE Catch2::Catch2WithMain glad glfw)
