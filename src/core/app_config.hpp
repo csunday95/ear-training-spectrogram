@@ -34,6 +34,7 @@ struct PitchConfig {
   Param<uint32_t> max_peaks               {"max_peaks",                    8u};
   Param<uint32_t> noise_estimation_frames {"noise_estimation_frames",     60u};  // ~3s at 21 FFT frames/s
   Param<float>    noise_floor_margin_db   {"noise_floor_margin_db",      3.0f};
+  Param<uint32_t> hps_harmonics           {"hps_harmonics",               5u};  // harmonic copies multiplied in HPS fundamental detection
 };
 
 struct TunerConfig {

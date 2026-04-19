@@ -56,10 +56,17 @@ public:
   // waterfall texture is (re)created to match fb_w — this resets history.
   void render(int fb_w, int fb_h);
 
-  // CPU pointer into the persistently-mapped magnitude SSBO.
+  // CPU pointer into the persistently-mapped magnitude SSBO (dB values).
   // Blocks (via fence) until the most recent GPU dispatch has completed.
   // Name makes the synchronisation cost explicit. (Phase 3 pitch detection.)
   [[nodiscard]] const float* sync_get_mag_data() const;
+
+  // CPU pointer into the persistently-mapped linear-magnitude SSBO.
+  // Returns normalized linear amplitudes (mag * mag_scale) written by magnitude.comp
+  // before the dB conversion — avoids a dB round-trip for HPS computation.
+  // The fence from sync_get_mag_data() covers this SSBO too; call sync_get_mag_data()
+  // first in the same frame before calling this.
+  [[nodiscard]] const float* sync_get_linear_mag_data() const;
 
   // Accessors for layout fractions set at construction — used by overlay widgets
   // (e.g. TunerWidget) to position themselves without duplicating values.
@@ -116,12 +123,14 @@ private:
   // SSBOs — handles are fixed after construction.
   const GLuint audio_ssbo_;
   const GLuint complex_ssbo_;
-  const GLuint magnitude_ssbo_;
+  const GLuint magnitude_ssbo_;      // dB magnitudes (binding 1 in magnitude.comp)
+  const GLuint linear_mag_ssbo_;     // scaled linear amplitudes (binding 2 in magnitude.comp)
   const GLuint max_hold_ssbo_;
   const GLuint smooth_ssbo_;   // GPU-only EMA state for per-bin magnitude smoothing
 
-  // Persistent CPU mapping of magnitude_ssbo (set in constructor body).
+  // Persistent CPU mappings (set in constructor body).
   const float* magnitude_ptr_{nullptr};
+  const float* linear_mag_ptr_{nullptr};
   GLsync       fence_{nullptr};
 
   // Compute programs — fixed after construction.

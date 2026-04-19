@@ -186,6 +186,9 @@ int main(int argc, char** argv) {
     // --- Pitch detection (only when new FFT data is available) ---
     if (dispatched) {
       const std::span<const float> raw_mag{pipeline.sync_get_mag_data(), fft_bins};
+      // Linear magnitudes are written by the same compute dispatch; fence is
+      // already satisfied by the sync_get_mag_data() call above.
+      const std::span<const float> linear_mag{pipeline.sync_get_linear_mag_data(), fft_bins};
 
       // Feed the noise estimator; once ready, subtract the estimated floor.
       noise_floor.update(raw_mag);
@@ -203,13 +206,37 @@ int main(int argc, char** argv) {
           cfg.pitch_detection.max_hwhm_bins.value,
           cfg.pitch_detection.max_peaks.value);
 
+      // HPS reorders FFT peaks so that peaks[0] is the best fundamental candidate
+      // for the Piano/Unknown path (not just the loudest bin).
+      if (!detection.peaks.empty()) {
+        const float hps_freq = audio::hps_fundamental(
+            linear_mag, fft_n, kSampleRate,
+            dc.log_freq_min.value,
+            dc.log_freq_max.value,
+            cfg.pitch_detection.hps_harmonics.value);
+
+        constexpr float kHpsMatchCents = 75.0f;
+        auto  best       = detection.peaks.end();
+        float best_cents = kHpsMatchCents;
+        for (auto it = detection.peaks.begin(); it != detection.peaks.end(); ++it) {
+          const float cents = std::abs(1200.0f * std::log2(it->frequency / hps_freq));
+          if (cents < best_cents) {
+            best_cents = cents;
+            best       = it;
+          }
+        }
+        if (best != detection.peaks.end() && best != detection.peaks.begin()) {
+          std::iter_swap(detection.peaks.begin(), best);
+        }
+      }
+
       // YIN operates on the newest hop (second half of frame_buf).
       const audio::YinResult yin_result = yin.estimate(frame_buf);
       const audio::AudioSource source   = source_classifier.update(
           std::span<const float>{frame_buf.data() + hop_size, hop_size});
 
       // Select the pitch source based on the amplitude-envelope classification.
-      // Voice → prefer YIN's fundamental; Piano/Unknown → use FFT peak detection.
+      // Voice → prefer YIN's fundamental; Piano/Unknown → use HPS-ordered FFT peaks.
       std::optional<audio::DetectionResult> raw_pitch;
       float active_freq = 0.0f;
       if (source == audio::AudioSource::Voice && yin_result.frequency > 0.0f) {

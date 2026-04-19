@@ -76,6 +76,9 @@ GpuPipeline::GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w,
     , magnitude_ssbo_{make_ssbo(
           static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)),
           GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)}
+    , linear_mag_ssbo_{make_ssbo(
+          static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)),
+          GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)}
     , max_hold_ssbo_{make_ssbo(
           static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)), 0)}
     , smooth_ssbo_{make_ssbo(
@@ -100,6 +103,12 @@ GpuPipeline::GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w,
       static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)));
   if (!magnitude_ptr_) {
     LOG_ERROR("GpuPipeline: failed to map magnitude buffer");
+    return;
+  }
+  linear_mag_ptr_ = map_magnitude(linear_mag_ssbo_,
+      static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)));
+  if (!linear_mag_ptr_) {
+    LOG_ERROR("GpuPipeline: failed to map linear magnitude buffer");
     return;
   }
 
@@ -180,10 +189,11 @@ void GpuPipeline::dispatch(std::span<const float> audio) {
   glDispatchCompute(1, 1, 1);
   glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 
-  // magnitude.comp — complex → dB (location 0 = mag_scale).
+  // magnitude.comp — complex → dB (binding 1) + scaled linear (binding 2).
   glUseProgram(prog_magnitude_);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, complex_ssbo_);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, magnitude_ssbo_);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, linear_mag_ssbo_);
   glProgramUniform1f(prog_magnitude_, 0, mag_scale_);
   glDispatchCompute(fft_dispatch, 1, 1);
   glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
@@ -316,6 +326,14 @@ const float* GpuPipeline::sync_get_mag_data() const {
     glClientWaitSync(fence_, GL_SYNC_FLUSH_COMMANDS_BIT, 10'000'000);
   }
   return magnitude_ptr_;
+}
+
+const float* GpuPipeline::sync_get_linear_mag_data() const {
+  // Both SSBOs are written in the same magnitude.comp dispatch, so the fence
+  // placed after that pass covers linear_mag_ssbo_ too. Callers must invoke
+  // sync_get_mag_data() first in the same frame (which performs the fence wait);
+  // this function just returns the already-ready pointer.
+  return linear_mag_ptr_;
 }
 
 }  // namespace core

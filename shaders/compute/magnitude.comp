@@ -19,19 +19,25 @@ layout(std430, binding = 1) restrict writeonly buffer MagnitudeBuffer {
   float magnitude[];
 };
 
+// Output: scaled linear amplitude for CPU-side HPS (avoids dB round-trip).
+layout(std430, binding = 2) restrict writeonly buffer LinearMagBuffer {
+  float linear_magnitude[];
+};
+
 void main() {
   uint i = gl_GlobalInvocationID.x;
   if (i >= FFT_N / 2 + 1)
     return;
 
   vec2 c = complex_in[i];
-  float mag = length(c);
+  float mag_scaled = length(c) * mag_scale;
+
+  // Write normalized linear amplitude before the log conversion.
+  linear_magnitude[i] = mag_scaled;
 
   // Convert to dB: 20 * log10(x) = 20 / ln(10) * ln(x) = 8.6859 * ln(x)
   // Clamp to epsilon to avoid log(0) → -inf.
   const float epsilon = 1e-8;
   const float inv_ln10 = 0.4342944819;  // 1 / ln(10)
-  float mag_db = 20.0 * inv_ln10 * log(max(mag * mag_scale, epsilon));
-
-  magnitude[i] = mag_db;
+  magnitude[i] = 20.0 * inv_ln10 * log(max(mag_scaled, epsilon));
 }

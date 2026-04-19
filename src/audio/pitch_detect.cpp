@@ -87,16 +87,55 @@ DetectionResult detect_peaks(std::span<const float> magnitude,
     });
   }
 
-  std::sort(result.peaks.begin(), result.peaks.end(),
-            [](const DetectedPeak& lhs, const DetectedPeak& rhs) {
-              return lhs.magnitude_db > rhs.magnitude_db;
-            });
-
+  // Peaks are collected in bin-ascending order (the loop runs low→high).
+  // No magnitude sort — the caller uses hps_fundamental() to select peaks[0].
   if (result.peaks.size() > static_cast<std::size_t>(max_peaks)) {
     result.peaks.resize(static_cast<std::size_t>(max_peaks));
   }
 
   return result;
+}
+
+float hps_fundamental(std::span<const float> magnitude_linear,
+                      uint32_t               fft_n,
+                      uint32_t               sample_rate,
+                      float                  f_min,
+                      float                  f_max,
+                      uint32_t               n_harmonics) {
+  const auto  num_bins = static_cast<uint32_t>(magnitude_linear.size());
+  const float bin_hz   = static_cast<float>(sample_rate) / static_cast<float>(fft_n);
+
+  if (num_bins < 3u || n_harmonics < 2u) {
+    return f_min;
+  }
+
+  // Search range: clamp upper bound so bin * n_harmonics stays within the buffer.
+  const auto bin_min = static_cast<uint32_t>(std::ceil(f_min / bin_hz));
+  const auto bin_max = std::min(
+      static_cast<uint32_t>(f_max / bin_hz),
+      (num_bins - 1u) / n_harmonics);
+
+  if (bin_min >= bin_max) {
+    return f_min;
+  }
+
+  uint32_t best_bin = bin_min;
+  float    best_hps = -1.0f;
+
+  for (uint32_t k = bin_min; k <= bin_max; ++k) {
+    float hps = 1.0f;
+    for (uint32_t h = 1u; h <= n_harmonics; ++h) {
+      hps *= magnitude_linear[k * h];
+    }
+    if (hps > best_hps) {
+      best_hps = hps;
+      best_bin = k;
+    }
+  }
+
+  // The matched detected peak (selected in the caller by nearest-cents) carries
+  // parabolic frequency refinement, so sub-bin precision is not needed here.
+  return static_cast<float>(best_bin) * bin_hz;
 }
 
 }  // namespace audio
