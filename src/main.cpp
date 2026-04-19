@@ -92,13 +92,20 @@ int main(int argc, char** argv) {
   int fb_w = 0, fb_h = 0;
   glfwGetFramebufferSize(window, &fb_w, &fb_h);
   const auto& dc = cfg.display;
-  core::GpuPipeline pipeline{*fft_cfg, fb_w,
-                             dc.db_min.value, dc.db_max.value,
-                             dc.spectrum_scale.value, dc.spectrum_fraction.value,
-                             dc.tuner_fraction.value,
-                             dc.log_freq_min.value, dc.log_freq_max.value,
-                             dc.smooth_alpha.value, dc.max_hold_decay_db.value,
-                             kSampleRate};
+  const core::GpuPipelineConfig pipeline_cfg{
+      .db_min            = dc.db_min.value,
+      .db_max            = dc.db_max.value,
+      .spectrum_scale    = dc.spectrum_scale.value,
+      .spectrum_fraction = dc.spectrum_fraction.value,
+      .waveform_fraction = dc.waveform_fraction.value,
+      .tuner_fraction    = dc.tuner_fraction.value,
+      .log_freq_min      = dc.log_freq_min.value,
+      .log_freq_max      = dc.log_freq_max.value,
+      .smooth_alpha      = dc.smooth_alpha.value,
+      .max_hold_decay_db = dc.max_hold_decay_db.value,
+      .sample_rate       = kSampleRate,
+  };
+  core::GpuPipeline pipeline{*fft_cfg, fb_w, pipeline_cfg};
   if (!pipeline.ok()) {
     LOG_ERROR("GPU pipeline failed to initialise — check shader compile errors above");
     return 1;
@@ -106,8 +113,8 @@ int main(int argc, char** argv) {
 
   // --- UI ---
   ui::ImGuiRenderer  imgui{window, "#version 450"};
-  const auto& wc = cfg.waveform_overlay;
-  ui::WaveformWidget waveform_widget{wc.width.value, wc.height.value, wc.margin.value};
+  ui::WaveformWidget waveform_widget{dc.spectrum_fraction.value, dc.waveform_fraction.value,
+                                     dc.tuner_fraction.value};
   ui::TunerWidget    tuner_widget{dc.spectrum_fraction.value, dc.tuner_fraction.value};
   ui::SpectrumAxisWidget axis_widget{dc.log_freq_min.value, dc.log_freq_max.value,
                                      dc.db_min.value, dc.db_max.value,

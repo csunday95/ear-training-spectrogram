@@ -6,30 +6,35 @@ namespace ui {
 
 namespace {
 
-// Space consumed by the ImGui title bar and window padding above the plot.
-constexpr float kTitleBarPad  = 28.f;
 constexpr float kMinMagnitude = -1.f;
 constexpr float kMaxMagnitude = 1.f;
 
 }  // namespace
 
-WaveformWidget::WaveformWidget(float width, float height, float margin)
-    : width_{width}, height_{height}, margin_{margin} {}
+WaveformWidget::WaveformWidget(float spectrum_fraction, float waveform_fraction,
+                               float tuner_fraction)
+    : spectrum_fraction_{spectrum_fraction}
+    , waveform_fraction_{waveform_fraction}
+    , tuner_fraction_{tuner_fraction} {}
 
 void WaveformWidget::draw(const FrameData& frame) {
   if (frame.waveform.empty()) {
     return;
   }
 
-  // Anchor to the bottom-right corner, clear of the spectrum viewport below.
-  ImGui::SetNextWindowPos(
-      {static_cast<float>(frame.window_width) - width_ - margin_,
-       static_cast<float>(frame.window_height) - height_ - margin_},
-      ImGuiCond_Always);
-  ImGui::SetNextWindowSize({width_, height_}, ImGuiCond_Always);
+  const float win_w  = static_cast<float>(frame.window_width);
+  const float win_h  = static_cast<float>(frame.window_height);
+  const float height = win_h * waveform_fraction_;
+  // Waterfall occupies the top fraction; waveform panel sits immediately below it.
+  const float y_top  = win_h * (1.0f - spectrum_fraction_ - tuner_fraction_ - waveform_fraction_);
 
-  if (ImGui::Begin("Waveform", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) {
-    const float plot_h = height_ - kTitleBarPad;
+  ImGui::SetNextWindowPos({0.0f, y_top}, ImGuiCond_Always);
+  ImGui::SetNextWindowSize({win_w, height}, ImGuiCond_Always);
+
+  constexpr auto kFlags = ImGuiWindowFlags_NoResize   | ImGuiWindowFlags_NoMove
+                        | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar
+                        | ImGuiWindowFlags_NoBringToFrontOnFocus;
+  if (ImGui::Begin("##waveform", nullptr, kFlags)) {
     ImGui::PlotLines(
         "##wave",
         frame.waveform.data(),
@@ -38,7 +43,7 @@ void WaveformWidget::draw(const FrameData& frame) {
         nullptr,
         kMinMagnitude,
         kMaxMagnitude,
-        {ImGui::GetContentRegionAvail().x, plot_h});
+        ImGui::GetContentRegionAvail());
   }
   ImGui::End();
 }

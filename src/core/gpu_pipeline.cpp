@@ -49,30 +49,28 @@ const float* GpuPipeline::map_magnitude(GLuint ssbo, GLsizeiptr size) {
 // Construction
 // ---------------------------------------------------------------------------
 
-GpuPipeline::GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w,
-                          float db_min, float db_max, float spectrum_scale,
-                          float spectrum_fraction, float tuner_fraction,
-                          float log_freq_min, float log_freq_max, float smooth_alpha,
-                          float max_hold_decay_db, uint32_t sample_rate)
-    : cfg_{cfg}
-    , fft_bins_{cfg.fft_n / 2u + 1u}
-    , db_min_{db_min}
-    , db_max_{db_max}
-    , mag_scale_{2.0f / static_cast<float>(cfg.fft_n)}
-    , spectrum_scale_{spectrum_scale}
-    , spectrum_fraction_{spectrum_fraction}
-    , tuner_fraction_{tuner_fraction}
-    , smooth_alpha_{smooth_alpha}
-    , max_hold_decay_db_{max_hold_decay_db}
-    , f_min_{log_freq_min}
-    , log_freq_range_{std::log2(log_freq_max / log_freq_min)}
-    , nyquist_{static_cast<float>(sample_rate) * 0.5f}
-    , windowed_(cfg.fft_n, 0.0f)
+GpuPipeline::GpuPipeline(const audio::FFTConfig& fft_cfg, int initial_fb_w,
+                          const GpuPipelineConfig& cfg)
+    : cfg_{fft_cfg}
+    , fft_bins_{fft_cfg.fft_n / 2u + 1u}
+    , db_min_{cfg.db_min}
+    , db_max_{cfg.db_max}
+    , mag_scale_{2.0f / static_cast<float>(fft_cfg.fft_n)}
+    , spectrum_scale_{cfg.spectrum_scale}
+    , spectrum_fraction_{cfg.spectrum_fraction}
+    , waveform_fraction_{cfg.waveform_fraction}
+    , tuner_fraction_{cfg.tuner_fraction}
+    , smooth_alpha_{cfg.smooth_alpha}
+    , max_hold_decay_db_{cfg.max_hold_decay_db}
+    , f_min_{cfg.log_freq_min}
+    , log_freq_range_{std::log2(cfg.log_freq_max / cfg.log_freq_min)}
+    , nyquist_{static_cast<float>(cfg.sample_rate) * 0.5f}
+    , windowed_(fft_cfg.fft_n, 0.0f)
     , audio_ssbo_{make_ssbo(
-          static_cast<GLsizeiptr>(cfg.fft_n * sizeof(float)),
+          static_cast<GLsizeiptr>(fft_cfg.fft_n * sizeof(float)),
           GL_DYNAMIC_STORAGE_BIT)}
     , complex_ssbo_{make_ssbo(
-          static_cast<GLsizeiptr>(cfg.fft_n * sizeof(float) * 2u), 0)}
+          static_cast<GLsizeiptr>(fft_cfg.fft_n * sizeof(float) * 2u), 0)}
     , magnitude_ssbo_{make_ssbo(
           static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)),
           GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT)}
@@ -83,13 +81,13 @@ GpuPipeline::GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w,
           static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)), 0)}
     , smooth_ssbo_{make_ssbo(
           static_cast<GLsizeiptr>(fft_bins_ * sizeof(float)), 0)}
-    , prog_fft_{make_compute("shaders/compute/fft.comp", cfg.preamble())}
-    , prog_magnitude_{make_compute("shaders/compute/magnitude.comp", cfg.preamble())}
+    , prog_fft_{make_compute("shaders/compute/fft.comp", fft_cfg.preamble())}
+    , prog_magnitude_{make_compute("shaders/compute/magnitude.comp", fft_cfg.preamble())}
     , prog_smooth_magnitude_{make_compute("shaders/compute/smooth_magnitude.comp",
-                                          cfg.preamble())}
-    , prog_max_hold_{make_compute("shaders/compute/max_hold.comp", cfg.preamble())}
+                                          fft_cfg.preamble())}
+    , prog_max_hold_{make_compute("shaders/compute/max_hold.comp", fft_cfg.preamble())}
     , prog_waterfall_update_{make_compute("shaders/compute/waterfall_update.comp",
-                                          cfg.preamble())}
+                                          fft_cfg.preamble())}
     , prog_waterfall_render_{make_render(
           "shaders/render/waterfall.vert", "shaders/render/waterfall.frag")}
     , prog_spectrum_render_{make_render(
@@ -271,14 +269,15 @@ void GpuPipeline::render(int fb_w, int fb_h) {
   }
 
   const int spectrum_h  = static_cast<int>(static_cast<float>(fb_h) * spectrum_fraction_);
+  const int waveform_h  = static_cast<int>(static_cast<float>(fb_h) * waveform_fraction_);
   const int tuner_h     = static_cast<int>(static_cast<float>(fb_h) * tuner_fraction_);
-  const int waterfall_h = fb_h - spectrum_h - tuner_h;
+  const int waterfall_h = fb_h - spectrum_h - waveform_h - tuner_h;
   const GLint fft_bins  = static_cast<GLint>(fft_bins_);
 
   glBindVertexArray(vao_);
 
   // --- Waterfall (top band) ---
-  glViewport(0, spectrum_h + tuner_h, fb_w, waterfall_h);
+  glViewport(0, spectrum_h + waveform_h + tuner_h, fb_w, waterfall_h);
   glUseProgram(prog_waterfall_render_);
   glBindTextureUnit(0, waterfall_tex_);
   // write_col_ is the oldest surviving column → maps to the left (oldest time) edge.

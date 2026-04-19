@@ -5,23 +5,25 @@
 namespace ui {
 
 /**
- * Small waveform overlay widget (bottom-right corner).
+ * Full-width waveform panel occupying the waveform_fraction band of the window,
+ * positioned immediately below the waterfall.
  *
- * Dimensions are set at construction so they can be driven from CLI args or
- * a future grid-fraction tiling layout. No defaults — the caller is explicit.
+ * Panel fractions must match the values passed to GpuPipeline so that GL and
+ * ImGui geometry stay in sync.
  */
 class WaveformWidget : public Widget {
 public:
-  // width / height: ImGui window size in pixels.
-  // margin: gap between the widget edge and the framebuffer corner.
-  WaveformWidget(float width, float height, float margin);
+  // spectrum_fraction: fraction of window height occupied by the spectrum panel.
+  // waveform_fraction: fraction of window height occupied by this waveform panel.
+  // tuner_fraction:    fraction of window height occupied by the tuner panel.
+  WaveformWidget(float spectrum_fraction, float waveform_fraction, float tuner_fraction);
 
   void draw(const FrameData& frame) override;
 
 private:
-  float width_;
-  float height_;
-  float margin_;
+  float spectrum_fraction_;
+  float waveform_fraction_;
+  float tuner_fraction_;
 };
 
 }  // namespace ui

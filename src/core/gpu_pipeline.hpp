@@ -12,29 +12,40 @@
 
 namespace core {
 
+// Display and audio parameters for GpuPipeline construction.
+// All fractions are proportions of the framebuffer height; they must sum to ≤ 1.
+struct GpuPipelineConfig {
+  // dB display range — with mag_scale = 2/fft_n, a full-scale sine hits ~0 dB.
+  float    db_min;
+  float    db_max;
+  // Fraction of the spectrum panel height that db_max maps to (controls headroom).
+  float    spectrum_scale;
+  // Panel height fractions. Waterfall takes the remainder: 1 - spectrum - waveform - tuner.
+  float    spectrum_fraction;
+  float    waveform_fraction;
+  float    tuner_fraction;
+  // Log-frequency display bounds in Hz.
+  float    log_freq_min;
+  float    log_freq_max;
+  // EMA weight for the per-bin magnitude smoothing pass (0 < alpha ≤ 1).
+  float    smooth_alpha;
+  // dB subtracted from the max-hold envelope per FFT frame.
+  float    max_hold_decay_db;
+  // Audio capture sample rate in Hz (used to compute the Nyquist frequency).
+  uint32_t sample_rate;
+};
+
 /**
  * GPU compute + render pipeline for the spectrogram display.
  *
  * Owns all GPU resources: SSBOs, programs, waterfall texture.
  * Call dispatch() each frame to run the FFT compute chain, then render()
  * to draw the waterfall and spectrum before the ImGui pass.
- *
- * Phase 3: magnitude_data() exposes a CPU-side view for pitch detection.
  */
 class GpuPipeline {
 public:
-  // initial_fb_w: framebuffer width at startup.
-  // db_min / db_max: dB display range for both waterfall colormap and spectrum axis.
-  //   With mag_scale = 2/fft_n normalisation, a full-scale sine hits ~0 dB.
-  // spectrum_fraction / tuner_fraction: fractions of framebuffer height for the spectrum
-  //   and tuner panels respectively. The waterfall takes the remainder.
-  // log_freq_min / log_freq_max: frequency bounds for the log-frequency display axis.
-  // smooth_alpha: EMA weight for the per-bin magnitude smoothing pass (0 < alpha ≤ 1).
-  // sample_rate: audio capture sample rate in Hz (used to compute the Nyquist frequency).
-  GpuPipeline(const audio::FFTConfig& cfg, int initial_fb_w, float db_min, float db_max,
-              float spectrum_scale, float spectrum_fraction, float tuner_fraction,
-              float log_freq_min, float log_freq_max, float smooth_alpha,
-              float max_hold_decay_db, uint32_t sample_rate);
+  GpuPipeline(const audio::FFTConfig& fft_cfg, int initial_fb_w,
+              const GpuPipelineConfig& cfg);
   ~GpuPipeline();
 
   GpuPipeline(const GpuPipeline&)            = delete;
@@ -70,8 +81,9 @@ public:
 
   // Accessors for layout fractions set at construction — used by overlay widgets
   // (e.g. TunerWidget) to position themselves without duplicating values.
-  [[nodiscard]] float spectrum_fraction() const { return spectrum_fraction_; }
-  [[nodiscard]] float tuner_fraction()    const { return tuner_fraction_; }
+  [[nodiscard]] float spectrum_fraction()  const { return spectrum_fraction_; }
+  [[nodiscard]] float waveform_fraction()  const { return waveform_fraction_; }
+  [[nodiscard]] float tuner_fraction()     const { return tuner_fraction_; }
 
 private:
   // kDbInit: value used to pre-fill max-hold SSBO and waterfall texture.
@@ -108,7 +120,8 @@ private:
   float            db_max_;
   float            mag_scale_;          // 2 / fft_n — normalises FFT output to 0 dB full-scale
   float            spectrum_scale_;     // fraction of panel height db_max maps to
-  float            spectrum_fraction_;  // fraction of fb_h for the spectrum panel
+  float            spectrum_fraction_;   // fraction of fb_h for the spectrum panel
+  float            waveform_fraction_;  // fraction of fb_h for the waveform panel
   float            tuner_fraction_;     // fraction of fb_h for the tuner band
   float            smooth_alpha_;        // EMA weight for the magnitude smoothing pass
   float            max_hold_decay_db_;  // dB subtracted from max-hold envelope per FFT frame

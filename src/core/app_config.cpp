@@ -39,33 +39,28 @@ void load_param(const nlohmann::json& section, Param<T>& param) {
 }
 
 // Known top-level section names — derived from kSection constants so they can't drift.
-constexpr std::array<std::string_view, 5> kTopLevelKeys = {
-    DisplayConfig::kSection, WaveformConfig::kSection,
-    PitchConfig::kSection,   TunerConfig::kSection,
-    YinConfig::kSection};
+constexpr std::array<std::string_view, 4> kTopLevelKeys = {
+    DisplayConfig::kSection, PitchConfig::kSection,
+    TunerConfig::kSection,   YinConfig::kSection};
 
 void write_default_config(const std::string& path, const AppConfig& cfg) {
   using json       = nlohmann::json;
   const auto& dc   = cfg.display;
-  const auto& wc   = cfg.waveform_overlay;
   const auto& pd   = cfg.pitch_detection;
   const auto& tc   = cfg.tuner_smoother;
   const auto& yc   = cfg.yin;
   const json j = {
       {DisplayConfig::kSection,
-       {{dc.db_min.key,            dc.db_min.value},
-        {dc.db_max.key,            dc.db_max.value},
-        {dc.spectrum_scale.key,    dc.spectrum_scale.value},
-        {dc.spectrum_fraction.key, dc.spectrum_fraction.value},
-        {dc.tuner_fraction.key,    dc.tuner_fraction.value},
-        {dc.log_freq_min.key,      dc.log_freq_min.value},
-        {dc.log_freq_max.key,      dc.log_freq_max.value},
-        {dc.smooth_alpha.key,      dc.smooth_alpha.value},
-        {dc.max_hold_decay_db.key, dc.max_hold_decay_db.value}}},
-      {WaveformConfig::kSection,
-       {{wc.width.key,  wc.width.value},
-        {wc.height.key, wc.height.value},
-        {wc.margin.key, wc.margin.value}}},
+       {{dc.db_min.key,             dc.db_min.value},
+        {dc.db_max.key,             dc.db_max.value},
+        {dc.spectrum_scale.key,     dc.spectrum_scale.value},
+        {dc.spectrum_fraction.key,  dc.spectrum_fraction.value},
+        {dc.waveform_fraction.key,  dc.waveform_fraction.value},
+        {dc.tuner_fraction.key,     dc.tuner_fraction.value},
+        {dc.log_freq_min.key,       dc.log_freq_min.value},
+        {dc.log_freq_max.key,       dc.log_freq_max.value},
+        {dc.smooth_alpha.key,       dc.smooth_alpha.value},
+        {dc.max_hold_decay_db.key,  dc.max_hold_decay_db.value}}},
       {PitchConfig::kSection,
        {{pd.min_db.key,                  pd.min_db.value},
         {pd.max_hwhm_bins.key,           pd.max_hwhm_bins.value},
@@ -132,25 +127,18 @@ AppConfig load_app_config(const std::string& path) {
     auto& dc      = cfg.display;
     warn_unknown_keys(d, DisplayConfig::kSection,
         {dc.db_min.key, dc.db_max.key, dc.spectrum_scale.key, dc.spectrum_fraction.key,
-         dc.tuner_fraction.key, dc.log_freq_min.key, dc.log_freq_max.key,
-         dc.smooth_alpha.key, dc.max_hold_decay_db.key});
+         dc.waveform_fraction.key, dc.tuner_fraction.key, dc.log_freq_min.key,
+         dc.log_freq_max.key, dc.smooth_alpha.key, dc.max_hold_decay_db.key});
     load_param(d, dc.db_min);
     load_param(d, dc.db_max);
     load_param(d, dc.spectrum_scale);
     load_param(d, dc.spectrum_fraction);
+    load_param(d, dc.waveform_fraction);
     load_param(d, dc.tuner_fraction);
     load_param(d, dc.log_freq_min);
     load_param(d, dc.log_freq_max);
     load_param(d, dc.smooth_alpha);
     load_param(d, dc.max_hold_decay_db);
-  }
-  if (j.contains(WaveformConfig::kSection)) {
-    const auto& w = j[WaveformConfig::kSection];
-    auto& wc      = cfg.waveform_overlay;
-    warn_unknown_keys(w, WaveformConfig::kSection, {wc.width.key, wc.height.key, wc.margin.key});
-    load_param(w, wc.width);
-    load_param(w, wc.height);
-    load_param(w, wc.margin);
   }
   if (j.contains(PitchConfig::kSection)) {
     const auto& p = j[PitchConfig::kSection];

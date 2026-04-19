@@ -12,19 +12,13 @@ struct DisplayConfig {
   Param<float> db_min            {"db_min",            -80.0f};
   Param<float> db_max            {"db_max",              0.0f};
   Param<float> spectrum_scale    {"spectrum_scale",      0.9f};
-  Param<float> spectrum_fraction {"spectrum_fraction",   0.40f};
+  Param<float> spectrum_fraction  {"spectrum_fraction",   0.30f};
+  Param<float> waveform_fraction {"waveform_fraction",   0.20f};
   Param<float> tuner_fraction    {"tuner_fraction",      0.20f};
   Param<float> log_freq_min      {"log_freq_min",       27.5f};   // A0 — lowest piano key
   Param<float> log_freq_max      {"log_freq_max",     4186.0f};   // C8 — highest piano key
   Param<float> smooth_alpha      {"smooth_alpha",        0.3f};   // EMA weight for per-bin magnitude smoothing
   Param<float> max_hold_decay_db {"max_hold_decay_db",   0.4f};   // dB subtracted from max-hold envelope per frame
-};
-
-struct WaveformConfig {
-  static constexpr const char* kSection = "waveform_overlay";
-  Param<float> width  {"width",  300.0f};
-  Param<float> height {"height",  80.0f};
-  Param<float> margin {"margin",  10.0f};
 };
 
 struct PitchConfig {
@@ -54,11 +48,10 @@ struct YinConfig {
 };
 
 struct AppConfig {
-  DisplayConfig  display;
-  WaveformConfig waveform_overlay;
-  PitchConfig    pitch_detection;
-  TunerConfig    tuner_smoother;
-  YinConfig      yin;
+  DisplayConfig display;
+  PitchConfig   pitch_detection;
+  TunerConfig   tuner_smoother;
+  YinConfig     yin;
 };
 
 // Load AppConfig from a JSON file at path.
